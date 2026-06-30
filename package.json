@@ -1,0 +1,22 @@
+{
+  "name": "maxprice",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@vercel/node": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "^5.8.3",
+    "vercel": "^44.2.10",
+    "vitest": "^3.2.3"
+  }
+}
