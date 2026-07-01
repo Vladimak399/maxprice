@@ -1,10 +1,14 @@
+import { Agent, request as httpsRequest } from "node:https";
+import { rootCertificates } from "node:tls";
 import { requireEnv } from "../utils/env";
 import { chunkText } from "../utils/text";
 import type { MaxAttachment } from "../types/max";
+import { RUSSIAN_TRUSTED_ROOT_CA } from "./russianTrustedRoot";
 
 const MAX_API_BASE_URL = "https://platform-api2.max.ru";
+const maxHttpsAgent = new Agent({ ca: [...rootCertificates, RUSSIAN_TRUSTED_ROOT_CA] });
 
-function getHeaders(): HeadersInit {
+function getHeaders(): Record<string, string> {
   return {
     Authorization: requireEnv("MAX_BOT_TOKEN"),
     "Content-Type": "application/json"
@@ -12,22 +16,36 @@ function getHeaders(): HeadersInit {
 }
 
 async function requestMax(path: string, options: RequestInit): Promise<unknown> {
-  const response = await fetch(`${MAX_API_BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      ...getHeaders(),
-      ...(options.headers ?? {})
-    }
+  const body = typeof options.body === "string" ? options.body : undefined;
+
+  return new Promise((resolve, reject) => {
+    const request = httpsRequest(`${MAX_API_BASE_URL}${path}`, {
+      method: options.method,
+      headers: getHeaders(),
+      agent: maxHttpsAgent
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        const status = response.statusCode ?? 500;
+        if (status < 200 || status >= 300) {
+          reject(new Error(`MAX API error ${status}: ${text}`));
+          return;
+        }
+        try {
+          resolve(text ? JSON.parse(text) as unknown : null);
+        } catch {
+          reject(new Error("MAX API returned invalid JSON"));
+        }
+      });
+    });
+
+    request.setTimeout(20_000, () => request.destroy(new Error("MAX API request timed out")));
+    request.on("error", reject);
+    if (body) request.write(body);
+    request.end();
   });
-
-  const text = await response.text();
-  const data = text.length > 0 ? JSON.parse(text) : null;
-
-  if (!response.ok) {
-    throw new Error(`MAX API error ${response.status}: ${text}`);
-  }
-
-  return data;
 }
 
 type SendMessageOptions = { attachments?: MaxAttachment[]; notify?: boolean };
