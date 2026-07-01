@@ -1,6 +1,6 @@
-import type { ParseResult, PriceChangeItem } from "../types/price.js";
-import { parseMoney, roundMoney, roundPercent } from "./money.js";
-import { detectShopInLine } from "./shops.js";
+import type { ParseResult, PriceChangeItem } from "../types/price";
+import { parseMoney, roundMoney, roundPercent } from "./money";
+import { detectShopInLine } from "./shops";
 
 const PRICE_LINE_RE = /^(?:(?:Цена\s+)?товара:\s*)?(?<name>.+),\s*\((?<newPrice>[\d\s]+(?:[,.]\d+)?)\)\s*,?\s*отличается\s*(?:от|то)?\s*текущ[а-яё\s]+закупочн[а-яё\s]+цены\s*-\s*(?<oldPrice>[\d\s]+(?:[,.]\d+)?)/iu;
 

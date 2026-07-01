@@ -1,5 +1,5 @@
 import type { VercelRequest } from "@vercel/node";
-import { getEnv, requireEnv } from "./env.js";
+import { getEnv, requireEnv } from "./env";
 
 export function isAdminAuthorized(req: VercelRequest): boolean {
   const adminSecret = requireEnv("ADMIN_SECRET");

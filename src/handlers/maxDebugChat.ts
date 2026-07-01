@@ -1,10 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { getChatConfig } from "../../src/config/chats.js";
-import { extractMaxUpdate } from "../../src/max/updateExtractor.js";
-import { parsePriceMessage } from "../../src/parser/priceParser.js";
-import { formatReport } from "../../src/parser/reportFormatter.js";
-import type { MaxUpdate } from "../../src/types/max.js";
-import { isAdminAuthorized } from "../../src/utils/auth.js";
+import { getChatConfig } from "../config/chats";
+import { extractMaxUpdate } from "../max/updateExtractor";
+import { parsePriceMessage } from "../parser/priceParser";
+import { formatReport } from "../parser/reportFormatter";
+import type { MaxUpdate } from "../types/max";
+import { isAdminAuthorized } from "../utils/auth";
 
 function readUpdate(req: VercelRequest): MaxUpdate {
   const body = typeof req.body === "string" ? JSON.parse(req.body) as Record<string, unknown> : (req.body ?? {}) as Record<string, unknown>;

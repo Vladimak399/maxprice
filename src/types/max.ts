@@ -11,6 +11,19 @@ export type ExtractedMaxUpdate = {
 export type MaxSendMessageBody = {
   text: string;
   notify?: boolean;
+  attachments?: MaxAttachment[];
+};
+
+export type MaxMessageButton = {
+  type: "message";
+  text: string;
+};
+
+export type MaxAttachment = {
+  type: "inline_keyboard";
+  payload: {
+    buttons: MaxMessageButton[][];
+  };
 };
 
 export type RegisterWebhookBody = {

@@ -1,4 +1,4 @@
-import type { ExtractedMaxUpdate, MaxUpdate } from "../types/max.js";
+import type { ExtractedMaxUpdate, MaxUpdate } from "../types/max";
 
 type UnknownRecord = Record<string, unknown>;
 

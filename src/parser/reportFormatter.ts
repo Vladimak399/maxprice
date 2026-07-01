@@ -1,6 +1,6 @@
-import type { GroupedPriceChange, ParseResult, PriceChangeItem } from "../types/price.js";
-import { chunkText } from "../utils/text.js";
-import { formatMoney, formatPercent } from "./money.js";
+import type { GroupedPriceChange, ParseResult, PriceChangeItem } from "../types/price";
+import { chunkText } from "../utils/text";
+import { formatMoney, formatPercent } from "./money";
 
 function normalizeProductKey(value: string): string {
   return value

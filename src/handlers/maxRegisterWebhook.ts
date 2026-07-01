@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { registerWebhook } from "../../src/max/client.js";
-import type { RegisterWebhookBody } from "../../src/types/max.js";
-import { isAdminAuthorized } from "../../src/utils/auth.js";
-import { getEnv, requireEnv } from "../../src/utils/env.js";
+import { registerWebhook } from "../max/client";
+import type { RegisterWebhookBody } from "../types/max";
+import { isAdminAuthorized } from "../utils/auth";
+import { getEnv, requireEnv } from "../utils/env";
 
 function readBody(req: VercelRequest): RegisterWebhookBody {
   if (typeof req.body === "string") {

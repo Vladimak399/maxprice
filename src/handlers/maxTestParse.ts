@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { parsePriceMessage } from "../../src/parser/priceParser.js";
-import { formatReport } from "../../src/parser/reportFormatter.js";
-import { isAdminAuthorized } from "../../src/utils/auth.js";
+import { parsePriceMessage } from "../parser/priceParser";
+import { formatReport } from "../parser/reportFormatter";
+import { isAdminAuthorized } from "../utils/auth";
 
 type TestParseBody = {
   text?: string;

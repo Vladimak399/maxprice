@@ -1,9 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
@@ -11,8 +12,13 @@
     "resolveJsonModule": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-    "outDir": "dist"
+    "outDir": "dist",
+    "plugins": [{ "name": "next" }],
+    "allowJs": true,
+    "noEmit": true,
+    "incremental": true,
+    "isolatedModules": true
   },
-  "include": ["api/**/*.ts", "src/**/*.ts", "tests/**/*.ts"],
+  "include": ["next-env.d.ts", ".next/types/**/*.ts", ".next/dev/types/**/*.ts", "api/**/*.ts", "app/**/*.ts", "app/**/*.tsx", "src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist", ".vercel"]
 }
