@@ -40,7 +40,7 @@ function cleanQuery(text: string): string {
   return norm(text
     .replace(/^(контакты|возвраты|возврат|отгрузка|отгрузки|юрлица|старые названия)\s*:?\s*/i, "")
     .replace(/^(поставщики менеджера|поставщики оператора|написать менеджеру|написать оператору)\s*:?\s*/i, "")
-    .replace(/\b(кто|какой|какая|какие|у|по|для|про|поставщик|поставщика|менеджер|оператор|отгрузка|отгрузки|возврат|возвраты|условия|доставляет|забирает|номер|телефон|контакт)\b/gi, " "));
+    .replace(/\b(кто|какой|какая|какие|у|по|для|про|поставщик|поставщика|менеджер|оператор|отгрузка|отгрузки|возврат|возвраты|условия|доставляет|забирает|номер|телефон|контакт)\b/gi, " "));
 }
 
 function supplierSearchBlob(supplier: ProductSupplier): string {
@@ -63,9 +63,20 @@ export function findProductSuppliers(query: string, limit = 5): ProductSupplier[
       return { supplier, score };
     })
     .filter((item) => item.score > 0)
-    .sort((left, right) => right.score - left.score || left.supplier.name.localeCompare(right.supplier.name, "ru"))
+    .sort((left, right) => right.score - left.supplier.name.localeCompare(right.supplier.name, "ru"))
     .slice(0, limit)
     .map((item) => item.supplier);
+}
+
+export function isProductKnowledgeIntent(text: string): boolean {
+  const raw = text.trim();
+  const normalized = norm(raw);
+  if (!raw) return false;
+  if (["продукты", "категория продукты", "продукты питания", "поставщики", "поставщики продуктов", "справочник поставщиков", norm(FIND_SUPPLIER), "ответственные менеджеры", "менеджеры", "по менеджеру", "операторы", "по оператору", "возвраты поставщикам", "возвраты", "возврат поставщикам", "отгрузки поставщиков", "отгрузки", "график отгрузки"].includes(normalized)) return true;
+  if (/^(контакты|возвраты|отгрузка|юрлица|старые названия)\s*:/i.test(raw)) return true;
+  if (/^(написать менеджеру|написать оператору|поставщики менеджера|поставщики оператора)/i.test(raw)) return true;
+  if (findProductSuppliers(raw, 1).length > 0) return true;
+  return /поставщик|поставщика|возврат|отгруз|менеджер|оператор/i.test(raw) && /продукт|продукты|товар/i.test(raw);
 }
 
 function shortName(name: string): string {
@@ -74,7 +85,7 @@ function shortName(name: string): string {
 
 function supplierButtons(supplier: ProductSupplier): string[][] {
   const name = shortName(supplier.name);
-  return [[`Контакты: ${name}`], [`Возвраты: ${name}`, `Отгрузка: ${name}`], [`Юрлица: ${name}`, `Старые названия: ${name}`], [SUPPLIERS]];
+  return [[`Контакты: ${name}`], [`Возвраты: ${name}`, `Отгрузка: ${name}`], [`Юрлица: ${name}`, `Старые названия: ${name}`], [SUPPLIERS, "Выйти из опроса"]];
 }
 
 function formatSupplierCard(supplier: ProductSupplier): string {
@@ -125,7 +136,7 @@ function formatOldNames(supplier: ProductSupplier): string {
 
 async function sendProductsMenu(update: ExtractedMaxUpdate): Promise<void> {
   await sendMessage(target(update), "Раздел: Продукты\n\nВыберите, что нужно найти.", {
-    attachments: keyboard([[SUPPLIERS], [MANAGERS, OPERATORS], [RETURNS, SHIPMENTS], [BACK]])
+    attachments: keyboard([[SUPPLIERS], [MANAGERS, OPERATORS], [RETURNS, SHIPMENTS], [BACK, "Выйти из опроса"]])
   });
 }
 
