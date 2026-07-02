@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { sendKnowledgeMenu } from "../knowledge/bot";
 import { sendMessage } from "../max/client";
 import type { ExtractedMaxUpdate, MaxAttachment, MaxMessageButton } from "../types/max";
 import { ensureSchema, getSql, isDatabaseConfigured } from "../knowledge/db";
@@ -26,7 +27,7 @@ export async function sendMainMenu(update: ExtractedMaxUpdate): Promise<void> {
 
 export async function handleKnowledgeMenu(update: ExtractedMaxUpdate): Promise<boolean> {
   if (normalized(update.text) !== "база знаний") return false;
-  await sendMessage(target(update), "Напишите вопрос по работе магазина, например: как оформить возврат, что делать с ценником, как принять товар.");
+  await sendKnowledgeMenu(update);
   return true;
 }
 
