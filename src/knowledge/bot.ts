@@ -1,6 +1,7 @@
 import { sendMessage } from "../max/client";
 import type { ExtractedMaxUpdate, MaxAttachment, MaxMessageButton } from "../types/max";
 import { isDatabaseConfigured } from "./db";
+import { handleProductSuppliersUpdate } from "./productSuppliersBot";
 import {
   findArticles,
   listCategories,
@@ -11,9 +12,10 @@ import {
 } from "./repository";
 import type { KnowledgeArticle } from "./types";
 
-const MENU_COMMANDS = new Set(["/start", "start", "меню", "главное меню"]);
+const MENU_COMMANDS = new Set(["/start", "start", "меню", "главное меню", "база знаний"]);
 const HELPFUL = "Ответ помог";
 const UNHELPFUL = "Ответ не помог";
+const PRODUCTS_SECTION = "Продукты";
 
 function target(update: ExtractedMaxUpdate): { chatId?: string; userId?: string } {
   if (update.chatId) return { chatId: update.chatId };
@@ -36,16 +38,21 @@ function pairRows(values: string[]): string[][] {
   return rows;
 }
 
-async function sendMenu(update: ExtractedMaxUpdate): Promise<void> {
+export async function sendKnowledgeMenu(update: ExtractedMaxUpdate): Promise<void> {
   if (!isDatabaseConfigured()) {
-    await sendMessage(target(update), "База знаний настраивается. Попробуйте ещё раз позднее.");
+    await sendMessage(
+      target(update),
+      "База знаний магазина\n\nСейчас доступен раздел «Продукты». Остальные разделы базы знаний настраиваются.",
+      { attachments: keyboard([[PRODUCTS_SECTION]]) }
+    );
     return;
   }
   const categories = await listCategories(true);
+  const titles = [PRODUCTS_SECTION, ...categories.map((category) => category.title).filter((title) => title !== PRODUCTS_SECTION)];
   await sendMessage(
     target(update),
     "База знаний магазина\n\nВыберите раздел или напишите вопрос своими словами.",
-    { attachments: keyboard(pairRows(categories.map((category) => category.title))) }
+    { attachments: keyboard(pairRows(titles)) }
   );
 }
 
@@ -63,11 +70,14 @@ async function sendArticle(update: ExtractedMaxUpdate, article: KnowledgeArticle
 export async function handleKnowledgeUpdate(update: ExtractedMaxUpdate): Promise<void> {
   const normalized = update.text.trim().toLowerCase();
   if (update.updateType === "bot_started" || MENU_COMMANDS.has(normalized)) {
-    await sendMenu(update);
+    await sendKnowledgeMenu(update);
     return;
   }
 
   if (!update.text.trim()) return;
+
+  if (await handleProductSuppliersUpdate(update)) return;
+
   if (!isDatabaseConfigured()) {
     await sendMessage(target(update), "База знаний временно недоступна. Сообщите руководителю.");
     return;
