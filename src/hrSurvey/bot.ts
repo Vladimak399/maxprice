@@ -19,7 +19,9 @@ export function isMenuCommand(text: string): boolean { return MENU_COMMANDS.has(
 export function isAdminCommand(text: string): boolean { return ADMIN_COMMANDS.has(normalized(text)); }
 
 export async function sendMainMenu(update: ExtractedMaxUpdate): Promise<void> {
-  await sendMessage(target(update), "Что хотите сделать?", { attachments: keyboard([["База знаний"]]) });
+  const rows = [["База знаний"]];
+  if (isDatabaseConfigured() && await getActiveSurvey()) rows.unshift(["Пройти опрос"]);
+  await sendMessage(target(update), "Что хотите сделать?", { attachments: keyboard(rows) });
 }
 
 export async function handleKnowledgeMenu(update: ExtractedMaxUpdate): Promise<boolean> {
