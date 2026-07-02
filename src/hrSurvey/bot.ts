@@ -3,7 +3,7 @@ import { sendMessage } from "../max/client";
 import type { ExtractedMaxUpdate, MaxAttachment, MaxMessageButton } from "../types/max";
 import { ensureSchema, getSql, isDatabaseConfigured } from "../knowledge/db";
 import { getSurveyHashSalt, hashSurveyUserId, parseSurveyAnswer } from "./logic";
-import { completeSession, ensureDefaultSurvey, findOpenSession, getActiveSurvey, getQuestion, getQuestions, isMaxAdmin, saveAnswer, setSurveyStatus } from "./repository";
+import { completeSession, ensureDefaultSurvey, findOpenSession, getActiveSurvey, getQuestions, isMaxAdmin, saveAnswer, setSurveyStatus } from "./repository";
 import { visibleQuestions } from "./visibility";
 
 const SURVEY_COMMANDS = new Set(["опрос", "/survey", "начать опрос", "пройти опрос", "hr-опрос", "/start_survey"]);
@@ -19,7 +19,7 @@ export function isMenuCommand(text: string): boolean { return MENU_COMMANDS.has(
 export function isAdminCommand(text: string): boolean { return ADMIN_COMMANDS.has(normalized(text)); }
 
 export async function sendMainMenu(update: ExtractedMaxUpdate): Promise<void> {
-  await sendMessage(target(update), "Что хотите сделать?", { attachments: keyboard([["Пройти опрос"], ["База знаний"]]) });
+  await sendMessage(target(update), "Что хотите сделать?", { attachments: keyboard([["База знаний"]]) });
 }
 
 export async function handleKnowledgeMenu(update: ExtractedMaxUpdate): Promise<boolean> {
@@ -32,44 +32,18 @@ export async function handleMaxAdminCommand(update: ExtractedMaxUpdate): Promise
   if (!isAdminCommand(update.text)) return false;
   if (!update.userId) { await sendMessage(target(update), "Доступ к админке проверяется только в личном чате."); return true; }
   if (!isDatabaseConfigured()) { await sendMessage(target(update), "База данных временно недоступна."); return true; }
-  if (await isMaxAdmin(update.userId)) {
-    const url = process.env.ADMIN_BASE_URL?.trim();
-    await sendMessage(target(update), url ? `Админка: ${url}` : "Ссылка на админку не настроена.");
-  } else await sendMessage(target(update), "Доступ к админке не найден");
+  if (await isMaxAdmin(update.userId)) { const url = process.env.ADMIN_BASE_URL?.trim(); await sendMessage(target(update), url ? `Админка: ${url}` : "Ссылка на админку не настроена."); } else await sendMessage(target(update), "Доступ к админке не найден");
   return true;
 }
 
-export async function hasOpenSurveySession(update: ExtractedMaxUpdate): Promise<boolean> {
-  if (!update.userId || !getSurveyHashSalt() || !isDatabaseConfigured()) return false;
-  return Boolean(await findOpenSession(hashSurveyUserId(update.userId)));
-}
-
-async function findOrCreateSurveySession(surveyId: string, userHash: string, chatHash: string | null) {
-  await ensureSchema();
-  const sql = getSql();
-  const openRows = await sql`SELECT * FROM hr_survey_sessions WHERE survey_id=${surveyId} AND user_hash=${userHash} AND completed=false ORDER BY updated_at DESC LIMIT 1` as any[];
-  if (openRows[0]) return openRows[0];
-  const maxRows = await sql`SELECT COALESCE(max(attempt_no),0)::int attempt FROM hr_survey_sessions WHERE survey_id=${surveyId} AND user_hash=${userHash}` as any[];
-  const attemptNo = Number(maxRows[0]?.attempt ?? 0) + 1;
-  const id = randomUUID();
-  const rows = await sql`INSERT INTO hr_survey_sessions (id,survey_id,user_hash,chat_hash,source_chat_id,attempt_no) VALUES (${id},${surveyId},${userHash},${chatHash},null,${attemptNo}) RETURNING *` as any[];
-  return rows[0];
-}
-
-async function nextVisible(session: any, startPosition: number) {
-  const questions = await getQuestions(session.survey_id);
-  const visible = visibleQuestions(questions, session);
-  const question = visible.find((item) => item.position >= startPosition) ?? null;
-  if (question && Number(session.current_question_position) !== question.position) await getSql()`UPDATE hr_survey_sessions SET current_question_position=${question.position}, updated_at=now() WHERE id=${session.id}`;
-  return { question, total: visible.length, answered: question ? visible.filter((item) => item.position < question.position).length : visible.length };
-}
+export async function hasOpenSurveySession(update: ExtractedMaxUpdate): Promise<boolean> { if (!update.userId || !getSurveyHashSalt() || !isDatabaseConfigured()) return false; return Boolean(await findOpenSession(hashSurveyUserId(update.userId))); }
+async function findOrCreateSurveySession(surveyId: string, userHash: string, chatHash: string | null) { await ensureSchema(); const sql = getSql(); const openRows = await sql`SELECT * FROM hr_survey_sessions WHERE survey_id=${surveyId} AND user_hash=${userHash} AND completed=false ORDER BY updated_at DESC LIMIT 1` as any[]; if (openRows[0]) return openRows[0]; const maxRows = await sql`SELECT COALESCE(max(attempt_no),0)::int attempt FROM hr_survey_sessions WHERE survey_id=${surveyId} AND user_hash=${userHash}` as any[]; const attemptNo = Number(maxRows[0]?.attempt ?? 0) + 1; const id = randomUUID(); const rows = await sql`INSERT INTO hr_survey_sessions (id,survey_id,user_hash,chat_hash,source_chat_id,attempt_no) VALUES (${id},${surveyId},${userHash},${chatHash},null,${attemptNo}) RETURNING *` as any[]; return rows[0]; }
+async function nextVisible(session: any, startPosition: number) { const questions = await getQuestions(session.survey_id); const visible = visibleQuestions(questions, session); const question = visible.find((item) => item.position >= startPosition) ?? null; if (question && Number(session.current_question_position) !== question.position) await getSql()`UPDATE hr_survey_sessions SET current_question_position=${question.position}, updated_at=now() WHERE id=${session.id}`; return { question, total: visible.length, answered: question ? visible.filter((item) => item.position < question.position).length : visible.length }; }
 
 async function sendQuestion(update: ExtractedMaxUpdate, session: any, startPosition = Number(session.current_question_position)): Promise<void> {
-  const next = await nextVisible(session, startPosition);
-  const q = next.question;
+  const next = await nextVisible(session, startPosition); const q = next.question;
   if (!q) { await completeSession(session.id); await sendMessage(target(update), "Спасибо. Ответы сохранены анонимно."); return; }
-  let text = `${next.answered + 1} из ${next.total}. ${q.text}`;
-  let rows: string[][] = [];
+  let text = `${next.answered + 1} из ${next.total}. ${q.text}`; let rows: string[][] = [];
   if (q.type === "scale_1_5") { text += "\n\nОцените по шкале 1-5, где 1 — плохо, 5 — отлично."; rows = [["1", "2", "3", "4", "5"]]; }
   else if (q.type === "single_choice") { text += "\n\nВыберите один вариант кнопкой или напишите текст варианта."; rows = pairs(q.options); }
   else if (q.type === "multi_choice") text += "\n\n" + q.options.map((o, i) => `${i + 1}. ${o}`).join("\n") + `\n\nНапишите номера через запятую, пробел или точку с запятой${q.maxChoices ? `. Можно выбрать не больше ${q.maxChoices}.` : "."}`;
@@ -82,8 +56,7 @@ export async function startOrContinueSurvey(update: ExtractedMaxUpdate): Promise
   if (!isDatabaseConfigured()) { await sendMessage(target(update), "Опросы временно недоступны: база данных не подключена."); return; }
   if (!update.userId) { await sendMessage(target(update), "Опрос можно пройти только в личном чате с ботом."); return; }
   let userHash: string;
-  try { userHash = hashSurveyUserId(update.userId); }
-  catch (e) { console.error(e); await sendMessage(target(update), "Опрос временно недоступен: не настроена анонимизация."); return; }
+  try { userHash = hashSurveyUserId(update.userId); } catch (e) { console.error(e); await sendMessage(target(update), "Опрос временно недоступен: не настроена анонимизация."); return; }
   let survey = await getActiveSurvey();
   if (!survey) { const defaultSurveyId = await ensureDefaultSurvey(); await setSurveyStatus(defaultSurveyId, "active"); survey = await getActiveSurvey(); }
   if (!survey) { await sendMessage(target(update), "Сейчас не удалось открыть HR-опрос автоматически. Попробуйте позже или обратитесь к администратору."); return; }
@@ -96,19 +69,10 @@ export async function startOrContinueSurvey(update: ExtractedMaxUpdate): Promise
 
 export async function handleSurveyAnswer(update: ExtractedMaxUpdate): Promise<boolean> {
   if (!update.userId || !getSurveyHashSalt() || !isDatabaseConfigured()) return false;
-  const session = await findOpenSession(hashSurveyUserId(update.userId));
-  if (!session) return false;
-  const current = await nextVisible(session, Number(session.current_question_position));
-  const q = current.question;
+  const session = await findOpenSession(hashSurveyUserId(update.userId)); if (!session) return false;
+  const current = await nextVisible(session, Number(session.current_question_position)); const q = current.question;
   if (!q) { await completeSession(session.id); await sendMessage(target(update), "Спасибо. Ответы сохранены анонимно."); return true; }
-  try {
-    const parsed = parseSurveyAnswer(q, update.text);
-    await saveAnswer(session, q, parsed);
-    const freshSession = { ...session, current_question_position: q.position + 1, ...(parsed.profileField === "employeeGroup" ? { employee_group: parsed.profileValue } : {}) };
-    const next = await nextVisible(freshSession, q.position + 1);
-    if (next.question) await sendMessage(target(update), `Ответ сохранён. Прогресс: ${next.answered} из ${next.total}.`);
-    await sendQuestion(update, freshSession, q.position + 1);
-  }
+  try { const parsed = parseSurveyAnswer(q, update.text); await saveAnswer(session, q, parsed); const freshSession = { ...session, current_question_position: q.position + 1, ...(parsed.profileField === "employeeGroup" ? { employee_group: parsed.profileValue } : {}) }; const next = await nextVisible(freshSession, q.position + 1); if (next.question) await sendMessage(target(update), `Ответ сохранён. Прогресс: ${next.answered} из ${next.total}.`); await sendQuestion(update, freshSession, q.position + 1); }
   catch (e) { await sendMessage(target(update), `${e instanceof Error ? e.message : "Не удалось сохранить ответ. Попробуйте ещё раз."}\n\nПовтор вопроса:`); await sendQuestion(update, session); }
   return true;
 }
