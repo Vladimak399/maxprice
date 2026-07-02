@@ -1,0 +1,10 @@
+export type SurveyStatus = "draft" | "active" | "closed";
+export type SurveyQuestionType = "scale_1_5" | "single_choice" | "multi_choice" | "text";
+export type HrSurvey = { id: string; title: string; description: string | null; status: SurveyStatus; anonymous: boolean; createdAt: string; updatedAt: string };
+export type HrSurveyQuestion = { id: string; surveyId: string; position: number; code: string; text: string; category: string; type: SurveyQuestionType; options: string[]; required: boolean; maxChoices: number | null };
+export type SurveyStats = { started: number; completed: number };
+export type CategoryScore = { category: string; average: number; count: number; zone: "red" | "yellow" | "normal" };
+export type ProblemStat = { question: string; option: string; count: number; share: number };
+export type OpenComment = { createdAt: string; sessionAnonId: string; question: string; answer: string; employeeGroup: string | null; employeeRole: string | null; tenure: string | null; storeOrDepartment: string | null };
+export type SurveyAnalytics = { started: number; completed: number; completionRate: number; scaleAverage: number | null; categories: CategoryScore[]; problems: ProblemStat[]; comments: OpenComment[] };
+export type ParsedAnswer = { answerText: string | null; answerNumber: number | null; answerJson: unknown | null; profileField?: "employeeGroup" | "employeeRole" | "tenure" | "storeOrDepartment"; profileValue?: string | null };
