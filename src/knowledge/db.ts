@@ -60,6 +60,32 @@ async function createSchema(): Promise<void> {
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS hr_survey_sessions_survey_user_attempt_idx ON hr_survey_sessions(survey_id, user_hash, attempt_no)`;
   await sql`CREATE INDEX IF NOT EXISTS hr_survey_sessions_open_idx ON hr_survey_sessions(survey_id, user_hash, completed)`;
   await sql`CREATE TABLE IF NOT EXISTS hr_survey_answers (id bigserial PRIMARY KEY, session_id text NOT NULL REFERENCES hr_survey_sessions(id) ON DELETE CASCADE, survey_id text NOT NULL REFERENCES hr_surveys(id) ON DELETE CASCADE, question_id text NOT NULL REFERENCES hr_survey_questions(id) ON DELETE CASCADE, question_code text NOT NULL, question_text text NOT NULL, category text NOT NULL, answer_text text, answer_number numeric, answer_json jsonb, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (session_id, question_id))`;
+
+  await sql`CREATE TABLE IF NOT EXISTS hr_survey_campaigns (
+    id text PRIMARY KEY,
+    survey_id text NOT NULL REFERENCES hr_surveys(id) ON DELETE CASCADE,
+    title text NOT NULL,
+    status text NOT NULL DEFAULT 'finished' CHECK (status IN ('draft','sending','finished','failed')),
+    total_count integer NOT NULL DEFAULT 0,
+    sent_count integer NOT NULL DEFAULT 0,
+    failed_count integer NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    started_at timestamptz,
+    finished_at timestamptz
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS hr_survey_campaigns_survey_idx ON hr_survey_campaigns(survey_id,created_at DESC)`;
+  await sql`CREATE TABLE IF NOT EXISTS hr_survey_invites (
+    id bigserial PRIMARY KEY,
+    campaign_id text NOT NULL REFERENCES hr_survey_campaigns(id) ON DELETE CASCADE,
+    survey_id text NOT NULL REFERENCES hr_surveys(id) ON DELETE CASCADE,
+    user_id text NOT NULL,
+    status text NOT NULL CHECK (status IN ('sent','failed')),
+    error text,
+    sent_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (campaign_id,user_id)
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS hr_survey_invites_survey_idx ON hr_survey_invites(survey_id,sent_at DESC)`;
+
   await sql`CREATE TABLE IF NOT EXISTS max_admin_users (id bigserial PRIMARY KEY, user_id text NOT NULL UNIQUE, name text, active boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now())`;
 
   const categories = [["returns", "returns", "Возвраты", 10], ["cash", "cash", "Касса", 20], ["receiving", "receiving", "Приёмка товара", 30], ["writeoffs", "writeoffs", "Списания", 40], ["inventory", "inventory", "Инвентаризация", 50], ["pricing", "pricing", "Цены и ценники", 60], ["personnel", "personnel", "Персонал", 70], ["emergency", "emergency", "Нештатные ситуации", 80]] as const;
