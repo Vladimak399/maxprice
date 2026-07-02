@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { sendMessage } from "../max/client";
 import type { ExtractedMaxUpdate, MaxAttachment, MaxMessageButton } from "../types/max";
-import { isDatabaseConfigured } from "../knowledge/db";
+import { ensureSchema, getSql, isDatabaseConfigured } from "../knowledge/db";
 import { getSurveyHashSalt, hashSurveyUserId, parseSurveyAnswer } from "./logic";
-import { completeSession, ensureDefaultSurvey, findOpenSession, findOrCreateSession, getActiveSurvey, getQuestion, getQuestions, isMaxAdmin, saveAnswer, setSurveyStatus } from "./repository";
+import { completeSession, ensureDefaultSurvey, findOpenSession, getActiveSurvey, getQuestion, getQuestions, isMaxAdmin, saveAnswer, setSurveyStatus } from "./repository";
 
 const SURVEY_COMMANDS = new Set(["опрос", "/survey", "начать опрос", "пройти опрос", "hr-опрос", "/start_survey"]);
 const MENU_COMMANDS = new Set(["/start", "start", "меню", "помощь"]);
@@ -42,6 +43,18 @@ export async function hasOpenSurveySession(update: ExtractedMaxUpdate): Promise<
   return Boolean(await findOpenSession(hashSurveyUserId(update.userId)));
 }
 
+async function findOrCreateSurveySession(surveyId: string, userHash: string, chatHash: string | null) {
+  await ensureSchema();
+  const sql = getSql();
+  const openRows = await sql`SELECT * FROM hr_survey_sessions WHERE survey_id=${surveyId} AND user_hash=${userHash} AND completed=false ORDER BY updated_at DESC LIMIT 1` as any[];
+  if (openRows[0]) return openRows[0];
+  const maxRows = await sql`SELECT COALESCE(max(attempt_no),0)::int attempt FROM hr_survey_sessions WHERE survey_id=${surveyId} AND user_hash=${userHash}` as any[];
+  const attemptNo = Number(maxRows[0]?.attempt ?? 0) + 1;
+  const id = randomUUID();
+  const rows = await sql`INSERT INTO hr_survey_sessions (id,survey_id,user_hash,chat_hash,source_chat_id,attempt_no) VALUES (${id},${surveyId},${userHash},${chatHash},null,${attemptNo}) RETURNING *` as any[];
+  return rows[0];
+}
+
 async function sendQuestion(update: ExtractedMaxUpdate, session: any): Promise<void> {
   const q = await getQuestion(session.survey_id, Number(session.current_question_position));
   if (!q) { await completeSession(session.id); await sendMessage(target(update), "Спасибо. Ответы сохранены анонимно."); return; }
@@ -68,14 +81,13 @@ export async function startOrContinueSurvey(update: ExtractedMaxUpdate): Promise
     survey = await getActiveSurvey();
   }
   if (!survey) { await sendMessage(target(update), "Сейчас не удалось открыть HR-опрос автоматически. Попробуйте позже или обратитесь к администратору."); return; }
-  const session = await findOrCreateSession(survey.id, userHash, update.chatId ? hashSurveyUserId(update.chatId) : null);
-  if (session.completed) { await sendMessage(target(update), "Вы уже прошли этот опрос. Спасибо. Повторно пройти его нельзя, чтобы не исказить результаты."); return; }
-
+  const session = await findOrCreateSurveySession(survey.id, userHash, update.chatId ? hashSurveyUserId(update.chatId) : null);
   const questions = await getQuestions(survey.id);
   const total = questions.length;
   const current = Number(session.current_question_position);
   const answered = Math.max(0, Math.min(current - 1, total));
-  if (current === 1) await sendMessage(target(update), `${survey.title}\n\n${survey.description ?? ""}\n\nПрогресс: 0 из ${total}. Можно выйти и вернуться позже, бот продолжит с этого места.`);
+  const attemptText = Number(session.attempt_no) > 1 ? `\n\nЭто повторное прохождение №${session.attempt_no}. Прошлые ответы не удаляются.` : "";
+  if (current === 1) await sendMessage(target(update), `${survey.title}\n\n${survey.description ?? ""}\n\nПрогресс: 0 из ${total}. Можно выйти и вернуться позже, бот продолжит с этого места.${attemptText}`);
   else await sendMessage(target(update), `Продолжаем опрос. Прогресс: ${answered} из ${total}. Следующий вопрос: ${current}.`);
   await sendQuestion(update, session);
 }
