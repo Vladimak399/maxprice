@@ -4,6 +4,7 @@ import type { ExtractedMaxUpdate, MaxAttachment, MaxMessageButton } from "../typ
 import { ensureSchema, getSql, isDatabaseConfigured } from "../knowledge/db";
 import { getSurveyHashSalt, hashSurveyUserId, parseSurveyAnswer } from "./logic";
 import { completeSession, ensureDefaultSurvey, findOpenSession, getActiveSurvey, getQuestion, getQuestions, isMaxAdmin, saveAnswer, setSurveyStatus } from "./repository";
+import { visibleQuestions } from "./visibility";
 
 const SURVEY_COMMANDS = new Set(["опрос", "/survey", "начать опрос", "пройти опрос", "hr-опрос", "/start_survey"]);
 const MENU_COMMANDS = new Set(["/start", "start", "меню", "помощь"]);
@@ -33,7 +34,7 @@ export async function handleMaxAdminCommand(update: ExtractedMaxUpdate): Promise
   if (!isDatabaseConfigured()) { await sendMessage(target(update), "База данных временно недоступна."); return true; }
   if (await isMaxAdmin(update.userId)) {
     const url = process.env.ADMIN_BASE_URL?.trim();
-    await sendMessage(target(update), url ? `Админка: ${url}` : "ADMIN_BASE_URL не задан. Администратору нужно добавить ADMIN_BASE_URL в переменные окружения Vercel.");
+    await sendMessage(target(update), url ? `Админка: ${url}` : "Ссылка на админку не настроена.");
   } else await sendMessage(target(update), "Доступ к админке не найден");
   return true;
 }
@@ -55,10 +56,19 @@ async function findOrCreateSurveySession(surveyId: string, userHash: string, cha
   return rows[0];
 }
 
-async function sendQuestion(update: ExtractedMaxUpdate, session: any): Promise<void> {
-  const q = await getQuestion(session.survey_id, Number(session.current_question_position));
+async function nextVisible(session: any, startPosition: number) {
+  const questions = await getQuestions(session.survey_id);
+  const visible = visibleQuestions(questions, session);
+  const question = visible.find((item) => item.position >= startPosition) ?? null;
+  if (question && Number(session.current_question_position) !== question.position) await getSql()`UPDATE hr_survey_sessions SET current_question_position=${question.position}, updated_at=now() WHERE id=${session.id}`;
+  return { question, total: visible.length, answered: question ? visible.filter((item) => item.position < question.position).length : visible.length };
+}
+
+async function sendQuestion(update: ExtractedMaxUpdate, session: any, startPosition = Number(session.current_question_position)): Promise<void> {
+  const next = await nextVisible(session, startPosition);
+  const q = next.question;
   if (!q) { await completeSession(session.id); await sendMessage(target(update), "Спасибо. Ответы сохранены анонимно."); return; }
-  let text = `${q.position}. ${q.text}`;
+  let text = `${next.answered + 1} из ${next.total}. ${q.text}`;
   let rows: string[][] = [];
   if (q.type === "scale_1_5") { text += "\n\nОцените по шкале 1-5, где 1 — плохо, 5 — отлично."; rows = [["1", "2", "3", "4", "5"]]; }
   else if (q.type === "single_choice") { text += "\n\nВыберите один вариант кнопкой или напишите текст варианта."; rows = pairs(q.options); }
@@ -73,22 +83,14 @@ export async function startOrContinueSurvey(update: ExtractedMaxUpdate): Promise
   if (!update.userId) { await sendMessage(target(update), "Опрос можно пройти только в личном чате с ботом."); return; }
   let userHash: string;
   try { userHash = hashSurveyUserId(update.userId); }
-  catch (e) { console.error(e); await sendMessage(target(update), "Опрос временно недоступен: не настроена анонимизация. Администратору нужно добавить SURVEY_HASH_SALT или проверить секреты бота в переменных окружения Vercel."); return; }
+  catch (e) { console.error(e); await sendMessage(target(update), "Опрос временно недоступен: не настроена анонимизация."); return; }
   let survey = await getActiveSurvey();
-  if (!survey) {
-    const defaultSurveyId = await ensureDefaultSurvey();
-    await setSurveyStatus(defaultSurveyId, "active");
-    survey = await getActiveSurvey();
-  }
+  if (!survey) { const defaultSurveyId = await ensureDefaultSurvey(); await setSurveyStatus(defaultSurveyId, "active"); survey = await getActiveSurvey(); }
   if (!survey) { await sendMessage(target(update), "Сейчас не удалось открыть HR-опрос автоматически. Попробуйте позже или обратитесь к администратору."); return; }
   const session = await findOrCreateSurveySession(survey.id, userHash, update.chatId ? hashSurveyUserId(update.chatId) : null);
-  const questions = await getQuestions(survey.id);
-  const total = questions.length;
-  const current = Number(session.current_question_position);
-  const answered = Math.max(0, Math.min(current - 1, total));
   const attemptText = Number(session.attempt_no) > 1 ? `\n\nЭто повторное прохождение №${session.attempt_no}. Прошлые ответы не удаляются.` : "";
-  if (current === 1) await sendMessage(target(update), `${survey.title}\n\n${survey.description ?? ""}\n\nПрогресс: 0 из ${total}. Можно выйти и вернуться позже, бот продолжит с этого места.${attemptText}`);
-  else await sendMessage(target(update), `Продолжаем опрос. Прогресс: ${answered} из ${total}. Следующий вопрос: ${current}.`);
+  if (Number(session.current_question_position) === 1) await sendMessage(target(update), `${survey.title}\n\n${survey.description ?? ""}\n\nЧасть вопросов будет зависеть от того, где вы работаете: магазин, офис или склад. Можно выйти и вернуться позже.${attemptText}`);
+  else await sendMessage(target(update), "Продолжаем опрос с того места, где вы остановились.");
   await sendQuestion(update, session);
 }
 
@@ -96,15 +98,16 @@ export async function handleSurveyAnswer(update: ExtractedMaxUpdate): Promise<bo
   if (!update.userId || !getSurveyHashSalt() || !isDatabaseConfigured()) return false;
   const session = await findOpenSession(hashSurveyUserId(update.userId));
   if (!session) return false;
-  const q = await getQuestion(session.survey_id, Number(session.current_question_position));
+  const current = await nextVisible(session, Number(session.current_question_position));
+  const q = current.question;
   if (!q) { await completeSession(session.id); await sendMessage(target(update), "Спасибо. Ответы сохранены анонимно."); return true; }
   try {
     const parsed = parseSurveyAnswer(q, update.text);
     await saveAnswer(session, q, parsed);
-    const nextPosition = Number(session.current_question_position) + 1;
-    const total = (await getQuestions(session.survey_id)).length;
-    if (nextPosition <= total) await sendMessage(target(update), `Ответ сохранён. Прогресс: ${nextPosition - 1} из ${total}.`);
-    await sendQuestion(update, { ...session, current_question_position: nextPosition });
+    const freshSession = { ...session, current_question_position: q.position + 1, ...(parsed.profileField === "employeeGroup" ? { employee_group: parsed.profileValue } : {}) };
+    const next = await nextVisible(freshSession, q.position + 1);
+    if (next.question) await sendMessage(target(update), `Ответ сохранён. Прогресс: ${next.answered} из ${next.total}.`);
+    await sendQuestion(update, freshSession, q.position + 1);
   }
   catch (e) { await sendMessage(target(update), `${e instanceof Error ? e.message : "Не удалось сохранить ответ. Попробуйте ещё раз."}\n\nПовтор вопроса:`); await sendQuestion(update, session); }
   return true;
