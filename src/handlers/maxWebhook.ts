@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getChatConfig, resolveTarget } from "../config/chats";
 import { handleKnowledgeUpdate } from "../knowledge/bot";
-import { handleKnowledgeMenu, handleMaxAdminCommand, handleSurveyAnswer, hasOpenSurveySession, isMenuCommand, isSurveyCommand, sendMainMenu, startOrContinueSurvey } from "../hrSurvey/bot";
+import { isProductKnowledgeIntent } from "../knowledge/productSuppliersBot";
+import { handleKnowledgeMenu, handleMaxAdminCommand, handleSurveyAnswer, handleSurveyExit, hasOpenSurveySession, isMenuCommand, isSurveyCommand, sendMainMenu, startOrContinueSurvey } from "../hrSurvey/bot";
 import { rememberMaxBotUser } from "../hrSurvey/repository";
 import { sendMessage } from "../max/client";
 import { extractMaxUpdate } from "../max/updateExtractor";
@@ -43,7 +44,9 @@ async function processUpdate(update: MaxUpdate): Promise<void> {
     if (isMenuCommand(extracted.text)) { await sendMainMenu(extracted); return; }
     if (await handleMaxAdminCommand(extracted)) return;
     if (isSurveyCommand(extracted.text)) { await startOrContinueSurvey(extracted); return; }
+    if (await handleSurveyExit(extracted)) return;
     if (await handleKnowledgeMenu(extracted)) return;
+    if (isProductKnowledgeIntent(extracted.text)) { await handleKnowledgeUpdate(extracted); return; }
     if (await hasOpenSurveySession(extracted)) { await handleSurveyAnswer(extracted); return; }
     await handleKnowledgeUpdate(extracted);
     return;
