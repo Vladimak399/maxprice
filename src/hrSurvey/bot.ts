@@ -8,6 +8,7 @@ import { completeSession, ensureDefaultSurvey, findOpenSession, getActiveSurvey,
 import { visibleQuestions } from "./visibility";
 
 const SURVEY_COMMANDS = new Set(["опрос", "/survey", "начать опрос", "пройти опрос", "hr-опрос", "/start_survey"]);
+const SURVEY_EXIT_COMMANDS = new Set(["выйти из опроса", "остановить опрос", "прекратить опрос", "пауза", "отмена", "отменить опрос"]);
 const MENU_COMMANDS = new Set(["/start", "start", "меню", "помощь"]);
 const ADMIN_COMMANDS = new Set(["/admin", "админка"]);
 const target = (u: ExtractedMaxUpdate) => u.chatId ? { chatId: u.chatId } : { userId: u.userId ?? undefined };
@@ -16,6 +17,7 @@ const pairs = (v: string[]) => { const rows: string[][] = []; for (let i = 0; i 
 const normalized = (text: string) => text.trim().toLowerCase();
 
 export function isSurveyCommand(text: string): boolean { return SURVEY_COMMANDS.has(normalized(text)); }
+export function isSurveyExitCommand(text: string): boolean { return SURVEY_EXIT_COMMANDS.has(normalized(text)); }
 export function isMenuCommand(text: string): boolean { return MENU_COMMANDS.has(normalized(text)); }
 export function isAdminCommand(text: string): boolean { return ADMIN_COMMANDS.has(normalized(text)); }
 
@@ -23,6 +25,12 @@ export async function sendMainMenu(update: ExtractedMaxUpdate): Promise<void> {
   const rows = [["База знаний"]];
   if (isDatabaseConfigured() && await getActiveSurvey()) rows.unshift(["Пройти опрос"]);
   await sendMessage(target(update), "Что хотите сделать?", { attachments: keyboard(rows) });
+}
+
+export async function handleSurveyExit(update: ExtractedMaxUpdate): Promise<boolean> {
+  if (!isSurveyExitCommand(update.text)) return false;
+  await sendMessage(target(update), "Опрос поставлен на паузу. Ответы не удалены. Когда захотите продолжить, нажмите «Пройти опрос».", { attachments: keyboard([["Пройти опрос"], ["База знаний"]]) });
+  return true;
 }
 
 export async function handleKnowledgeMenu(update: ExtractedMaxUpdate): Promise<boolean> {
@@ -52,6 +60,7 @@ async function sendQuestion(update: ExtractedMaxUpdate, session: any, startPosit
   else if (q.type === "multi_choice") text += "\n\n" + q.options.map((o, i) => `${i + 1}. ${o}`).join("\n") + `\n\nНапишите номера через запятую, пробел или точку с запятой${q.maxChoices ? `. Можно выбрать не больше ${q.maxChoices}.` : "."}`;
   else if (!q.required) { text += "\n\nМожно написать свободный ответ или «пропустить»."; rows = [["Пропустить"]]; }
   if (!q.required && q.type !== "text") rows.push(["Пропустить"]);
+  rows.push(["Выйти из опроса", "База знаний"]);
   await sendMessage(target(update), text, rows.length ? { attachments: keyboard(rows) } : {});
 }
 
@@ -71,6 +80,7 @@ export async function startOrContinueSurvey(update: ExtractedMaxUpdate): Promise
 }
 
 export async function handleSurveyAnswer(update: ExtractedMaxUpdate): Promise<boolean> {
+  if (await handleSurveyExit(update)) return true;
   if (!update.userId || !getSurveyHashSalt() || !isDatabaseConfigured()) return false;
   const session = await findOpenSession(hashSurveyUserId(update.userId)); if (!session) return false;
   const current = await nextVisible(session, Number(session.current_question_position)); const q = current.question;
