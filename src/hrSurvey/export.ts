@@ -72,7 +72,11 @@ const STYLE = { normal: 0, title: 1, section: 2, header: 3, kpi: 4, red: 5, yell
 
 function round(value: number, digits = 2): number { return Number(value.toFixed(digits)); }
 function pct(value: number): string { return `${round(value * 100, 1)}%`; }
-function asNumber(value: unknown): number | null { const number = Number(value); return Number.isFinite(number) ? number : null; }
+function asNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
 function asDate(value: unknown): string { return value ? new Date(value as string).toLocaleString("ru-RU") : ""; }
 function categoryLabel(category: string): string { return CATEGORY_LABELS[category] ?? category; }
 function zoneLabel(zone: Zone): string { return zone === "red" ? "красная" : zone === "yellow" ? "жёлтая" : "нормальная"; }
@@ -80,7 +84,6 @@ function zoneStyle(zone: Zone): number { return zone === "red" ? STYLE.red : zon
 function zoneByScore(average: number | null, lowShare: number): Zone { if (average === null) return "normal"; if (average < 3.2 || lowShare > 0.3) return "red"; if (average <= 3.8 || lowShare >= 0.15) return "yellow"; return "normal"; }
 function zoneByShare(share: number): Zone { if (share >= 0.3) return "red"; if (share >= 0.15) return "yellow"; return "normal"; }
 function conclusion(zone: Zone): string { return zone === "red" ? "Критичная зона. Нужен разбор причин и ответственный." : zone === "yellow" ? "Зона напряжения. Нужно уточнить причины." : "Существенной проблемы не видно."; }
-
 function cell(value: CellValue, style = STYLE.normal): Cell { return { value, style }; }
 function red(value: CellValue): Cell { return cell(value, STYLE.red); }
 function yellow(value: CellValue): Cell { return cell(value, STYLE.yellow); }
@@ -92,7 +95,6 @@ function answerOptions(value: unknown): string[] {
   if (typeof value !== "string") return [];
   try { const parsed = JSON.parse(value) as unknown; return Array.isArray(parsed) ? parsed.map(String) : []; } catch { return []; }
 }
-
 function answerText(answer: any): string {
   if (!answer) return "";
   const selected = answerOptions(answer.answer_json);
@@ -104,13 +106,13 @@ function answerText(answer: any): string {
 function questionStats(questions: any[], answers: any[]) {
   return questions.map((question) => {
     const rows = answers.filter((answer) => answer.question_id === question.id);
-    const scores = rows.map((answer) => asNumber(answer.answer_number)).filter((value): value is number => value !== null);
+    const scores = question.type === "scale_1_5" ? rows.map((answer) => asNumber(answer.answer_number)).filter((value): value is number => value !== null) : [];
     const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     for (const score of scores) if (score >= 1 && score <= 5) counts[score] = (counts[score] ?? 0) + 1;
-    const average = scores.length ? round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : null;
+    const average = question.type === "scale_1_5" && scores.length ? round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : null;
     const lowShare = scores.length ? ((counts[1] ?? 0) + (counts[2] ?? 0)) / scores.length : 0;
     const highShare = scores.length ? ((counts[4] ?? 0) + (counts[5] ?? 0)) / scores.length : 0;
-    return { position: Number(question.position), code: question.code, category: question.category, categoryLabel: categoryLabel(question.category), question: question.text, type: question.type, count: rows.length, average, lowShare, highShare, zone: question.type === "scale_1_5" ? zoneByScore(average, lowShare) : "normal" as Zone, counts };
+    return { position: Number(question.position), code: question.code, category: question.category, categoryLabel: categoryLabel(question.category), question: question.text, type: question.type, count: rows.length, scoreCount: scores.length, average, lowShare, highShare, zone: question.type === "scale_1_5" ? zoneByScore(average, lowShare) : "normal" as Zone, counts };
   });
 }
 
@@ -119,9 +121,9 @@ function categoryStats(stats: ReturnType<typeof questionStats>) {
   for (const stat of stats) {
     if (stat.type !== "scale_1_5" || stat.average === null) continue;
     const current = map.get(stat.category) ?? { sum: 0, count: 0, lows: 0 };
-    current.sum += stat.average * stat.count;
-    current.count += stat.count;
-    current.lows += Math.round(stat.lowShare * stat.count);
+    current.sum += stat.average * stat.scoreCount;
+    current.count += stat.scoreCount;
+    current.lows += Math.round(stat.lowShare * stat.scoreCount);
     map.set(stat.category, current);
   }
   return [...map.entries()].map(([category, value]) => {
@@ -164,12 +166,10 @@ function commentRows(answers: any[], sessionsById: Map<string, any>) {
     return { createdAt: asDate(answer.created_at), sessionId: anonSessionId(answer.session_id), employeeGroup: session?.employee_group ?? "", employeeRole: session?.employee_role ?? "", tenure: session?.tenure ?? "", store: session?.store_or_department ?? "", type: answer.question_code === "anonymous_problem" ? "Анонимная проблема" : answer.question_code === "keep_good" ? "Что сохранить" : "Что улучшить", comment: text, topic, attention };
   });
 }
-
 function sessionAverage(sessionIds: Set<string>, answers: any[]): number | null {
   const scores = answers.filter((answer) => sessionIds.has(answer.session_id)).map((answer) => asNumber(answer.answer_number)).filter((value): value is number => value !== null);
   return scores.length ? round(scores.reduce((sum, value) => sum + value, 0) / scores.length) : null;
 }
-
 function sliceRows(title: string, sessions: any[], answers: any[], field: string) {
   const map = new Map<string, any[]>();
   for (const session of sessions.filter((item) => item.completed)) {
@@ -179,91 +179,44 @@ function sliceRows(title: string, sessions: any[], answers: any[], field: string
   return [...map.entries()].map(([group, rows]) => ({ title, group, count: rows.length, average: sessionAverage(new Set(rows.map((row) => row.id)), answers), reliability: rows.length < 3 ? "мало ответов" : "можно анализировать" }));
 }
 
-function xmlEscape(value: CellValue): string {
-  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-}
-
-function colName(index: number): string {
-  let name = "";
-  while (index > 0) { const mod = (index - 1) % 26; name = String.fromCharCode(65 + mod) + name; index = Math.floor((index - mod) / 26); }
-  return name;
-}
-
-function readCell(cellValue: Cell): { value: CellValue; style: number } {
-  if (typeof cellValue === "object" && cellValue !== null && "value" in cellValue) return { value: cellValue.value, style: cellValue.style ?? STYLE.normal };
-  return { value: cellValue, style: STYLE.normal };
-}
-
+function xmlEscape(value: CellValue): string { return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;"); }
+function colName(index: number): string { let name = ""; while (index > 0) { const mod = (index - 1) % 26; name = String.fromCharCode(65 + mod) + name; index = Math.floor((index - mod) / 26); } return name; }
+function readCell(cellValue: Cell): { value: CellValue; style: number } { if (typeof cellValue === "object" && cellValue !== null && "value" in cellValue) return { value: cellValue.value, style: cellValue.style ?? STYLE.normal }; return { value: cellValue, style: STYLE.normal }; }
 function worksheetXml(sheet: SheetSpec): string {
   const cols = sheet.columns.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("");
-  const rows = sheet.rows.map((row, rowIndex) => `<row r="${rowIndex + 1}" ht="${rowIndex === 0 ? 28 : 36}" customHeight="1">${row.map((rawCell, colIndex) => {
-    const c = readCell(rawCell);
-    const ref = `${colName(colIndex + 1)}${rowIndex + 1}`;
-    if (typeof c.value === "number") return `<c r="${ref}" s="${c.style}"><v>${c.value}</v></c>`;
-    return `<c r="${ref}" s="${c.style}" t="inlineStr"><is><t>${xmlEscape(c.value)}</t></is></c>`;
-  }).join("")}</row>`).join("");
+  const rows = sheet.rows.map((row, rowIndex) => `<row r="${rowIndex + 1}" ht="${rowIndex === 0 ? 28 : 36}" customHeight="1">${row.map((rawCell, colIndex) => { const c = readCell(rawCell); const ref = `${colName(colIndex + 1)}${rowIndex + 1}`; if (typeof c.value === "number") return `<c r="${ref}" s="${c.style}"><v>${c.value}</v></c>`; return `<c r="${ref}" s="${c.style}" t="inlineStr"><is><t>${xmlEscape(c.value)}</t></is></c>`; }).join("")}</row>`).join("");
   const merges = sheet.merges?.length ? `<mergeCells count="${sheet.merges.length}">${sheet.merges.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>` : "";
   const view = sheet.freeze ? `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` : `<sheetViews><sheetView workbookViewId="0"/></sheetViews>`;
   const autoFilter = sheet.autoFilter ? `<autoFilter ref="${sheet.autoFilter}"/>` : "";
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${view}<cols>${cols}</cols><sheetData>${rows}</sheetData>${autoFilter}${merges}</worksheet>`;
 }
+function stylesXml(): string { return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="6"><font><sz val="11"/><color rgb="FF0F172A"/><name val="Calibri"/></font><font><b/><sz val="16"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FF991B1B"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FF92400E"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FF166534"/><name val="Calibri"/></font></fonts><fills count="8"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F172A"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDBEAFE"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFEE2E2"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFEF3C7"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDCFCE7"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF8FAFC"/></patternFill></fill></fills><borders count="2"><border/><border><left style="thin"><color rgb="FFCBD5E1"/></left><right style="thin"><color rgb="FFCBD5E1"/></right><top style="thin"><color rgb="FFCBD5E1"/></top><bottom style="thin"><color rgb="FFCBD5E1"/></bottom></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="10"><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="left" wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="left" wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf><xf numFmtId="0" fontId="3" fillId="4" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf><xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf><xf numFmtId="0" fontId="5" fillId="6" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="7" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="7" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`; }
 
-function stylesXml(): string {
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="6"><font><sz val="11"/><color rgb="FF0F172A"/><name val="Calibri"/></font><font><b/><sz val="16"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FF991B1B"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FF92400E"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FF166534"/><name val="Calibri"/></font></fonts><fills count="8"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F172A"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDBEAFE"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFEE2E2"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFEF3C7"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDCFCE7"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF8FAFC"/></patternFill></fill></fills><borders count="2"><border/><border><left style="thin"><color rgb="FFCBD5E1"/></left><right style="thin"><color rgb="FFCBD5E1"/></right><top style="thin"><color rgb="FFCBD5E1"/></top><bottom style="thin"><color rgb="FFCBD5E1"/></bottom></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="10"><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="left" wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="left" wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf><xf numFmtId="0" fontId="3" fillId="4" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf><xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf><xf numFmtId="0" fontId="5" fillId="6" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="7" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="7" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" horizontal="center" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
-}
-
-const crcTable = new Uint32Array(256).map((_, n) => {
-  let c = n;
-  for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  return c >>> 0;
-});
-
-function crc32(buffer: Buffer): number {
-  let crc = 0xffffffff;
-  for (const byte of buffer) crc = crcTable[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
+const crcTable = new Uint32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+function crc32(buffer: Buffer): number { let crc = 0xffffffff; for (const byte of buffer) crc = crcTable[(crc ^ byte) & 0xff]! ^ (crc >>> 8); return (crc ^ 0xffffffff) >>> 0; }
 function zip(files: Array<{ path: string; content: string | Buffer }>): Buffer {
-  const locals: Buffer[] = [];
-  const centrals: Buffer[] = [];
-  let offset = 0;
+  const locals: Buffer[] = []; const centrals: Buffer[] = []; let offset = 0;
   for (const file of files) {
-    const name = Buffer.from(file.path);
-    const content = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content);
-    const crc = crc32(content);
-    const local = Buffer.alloc(30 + name.length);
-    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0, 6); local.writeUInt16LE(0, 8); local.writeUInt16LE(0, 10); local.writeUInt16LE(0, 12); local.writeUInt32LE(crc, 14); local.writeUInt32LE(content.length, 18); local.writeUInt32LE(content.length, 22); local.writeUInt16LE(name.length, 26); local.writeUInt16LE(0, 28); name.copy(local, 30);
-    locals.push(local, content);
-    const central = Buffer.alloc(46 + name.length);
-    central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(0, 8); central.writeUInt16LE(0, 10); central.writeUInt16LE(0, 12); central.writeUInt16LE(0, 14); central.writeUInt32LE(crc, 16); central.writeUInt32LE(content.length, 20); central.writeUInt32LE(content.length, 24); central.writeUInt16LE(name.length, 28); central.writeUInt16LE(0, 30); central.writeUInt16LE(0, 32); central.writeUInt16LE(0, 34); central.writeUInt16LE(0, 36); central.writeUInt32LE(0, 38); central.writeUInt32LE(offset, 42); name.copy(central, 46);
-    centrals.push(central);
-    offset += local.length + content.length;
+    const name = Buffer.from(file.path); const content = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content); const crc = crc32(content);
+    const local = Buffer.alloc(30 + name.length); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0, 6); local.writeUInt16LE(0, 8); local.writeUInt16LE(0, 10); local.writeUInt16LE(0, 12); local.writeUInt32LE(crc, 14); local.writeUInt32LE(content.length, 18); local.writeUInt32LE(content.length, 22); local.writeUInt16LE(name.length, 26); local.writeUInt16LE(0, 28); name.copy(local, 30); locals.push(local, content);
+    const central = Buffer.alloc(46 + name.length); central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(0, 8); central.writeUInt16LE(0, 10); central.writeUInt16LE(0, 12); central.writeUInt16LE(0, 14); central.writeUInt32LE(crc, 16); central.writeUInt32LE(content.length, 20); central.writeUInt32LE(content.length, 24); central.writeUInt16LE(name.length, 28); central.writeUInt16LE(0, 30); central.writeUInt16LE(0, 32); central.writeUInt16LE(0, 34); central.writeUInt16LE(0, 36); central.writeUInt32LE(0, 38); central.writeUInt32LE(offset, 42); name.copy(central, 46); centrals.push(central); offset += local.length + content.length;
   }
-  const centralSize = centrals.reduce((sum, item) => sum + item.length, 0);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(0, 4); end.writeUInt16LE(0, 6); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(centralSize, 12); end.writeUInt32LE(offset, 16); end.writeUInt16LE(0, 20);
-  return Buffer.concat([...locals, ...centrals, end]);
+  const centralSize = centrals.reduce((sum, item) => sum + item.length, 0); const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(0, 4); end.writeUInt16LE(0, 6); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(centralSize, 12); end.writeUInt32LE(offset, 16); end.writeUInt16LE(0, 20); return Buffer.concat([...locals, ...centrals, end]);
 }
-
 function buildXlsx(sheets: SheetSpec[]): Buffer {
   const sheetOverrides = sheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("");
   const workbookSheets = sheets.map((sheet, index) => `<sheet name="${xmlEscape(sheet.name.slice(0, 31))}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("");
   const rels = sheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("");
-  const files = [
+  return zip([
     { path: "[Content_Types].xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheetOverrides}</Types>` },
     { path: "_rels/.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
     { path: "xl/workbook.xml", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="0"/></bookViews><sheets>${workbookSheets}</sheets></workbook>` },
     { path: "xl/_rels/workbook.xml.rels", content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
     { path: "xl/styles.xml", content: stylesXml() },
     ...sheets.map((sheet, index) => ({ path: `xl/worksheets/sheet${index + 1}.xml`, content: worksheetXml(sheet) }))
-  ];
-  return zip(files);
-}
-
-function tableSheet(name: string, headers: string[], rows: Cell[][], widths: number[]): SheetSpec {
-  return { name, columns: widths, rows: [[...headers.map((header) => cell(header, STYLE.header))], ...rows], freeze: true, autoFilter: `A1:${colName(headers.length)}${Math.max(1, rows.length + 1)}` };
-}
+  ]);
+}\n
+function tableSheet(name: string, headers: string[], rows: Cell[][], widths: number[]): SheetSpec { return { name, columns: widths, rows: [[...headers.map((header) => cell(header, STYLE.header))], ...rows], freeze: true, autoFilter: `A1:${colName(headers.length)}${Math.max(1, rows.length + 1)}` }; }
 
 export async function buildSurveyWorkbook(surveyId: string): Promise<Buffer> {
   await ensureSchema();
@@ -284,7 +237,12 @@ export async function buildSurveyWorkbook(surveyId: string): Promise<Buffer> {
   const average = sessionAverage(new Set(sessions.map((session) => session.id)), answers);
   const redZones = cStats.filter((item) => item.zone === "red").length;
   const yellowZones = cStats.filter((item) => item.zone === "yellow").length;
-  const weakQuestions = qStats.filter((item) => item.average !== null).sort((left, right) => (left.average ?? 99) - (right.average ?? 99));
+  const weakQuestions = qStats.filter((item) => item.type === "scale_1_5" && item.scoreCount > 0 && item.average !== null).sort((left, right) => (left.average ?? 99) - (right.average ?? 99));
+  const weakRows = weakQuestions.length ? Array.from({ length: Math.max(5, Math.min(10, weakQuestions.length)) }, (_, index) => {
+    const question = weakQuestions[index];
+    return [question?.question ?? "", question?.average ?? "", question ? byZone(zoneLabel(question.zone), question.zone) : "", question ? CATEGORY_HELP[question.category]?.action ?? "Разобрать вручную" : ""];
+  }) : [[cell("Пока нет оценочных ответов по шкале 1-5", STYLE.note), "", "", ""]];
+  const problemRows = pStats.length ? pStats.slice(0, Math.max(5, Math.min(10, pStats.length))).map((problem) => [problem.option, problem.count, pct(problem.share), byZone(zoneLabel(problem.zone), problem.zone)]) : [[cell("Пока нет выбранных проблем", STYLE.note), "", "", ""]];
 
   const dashboardRows: Cell[][] = [
     [cell(`HR-опрос: ${survey.title}`, STYLE.title), "", "", "", "", "", "", ""],
@@ -296,26 +254,21 @@ export async function buildSurveyWorkbook(surveyId: string): Promise<Buffer> {
     [cell("Общий вывод", STYLE.section), "", "", "", cell("Первые действия HR", STYLE.section), "", "", ""],
     [byZone(average === null ? "Пока нет числовых ответов." : average < 3.2 ? "Общая удовлетворенность в красной зоне. Нужен разбор причин с HR и руководителями." : average <= 3.8 ? "Есть зоны напряжения. Начните со слабых вопросов и частых проблем." : "Общая оценка нормальная. Проверьте локальные проблемы и комментарии.", average === null ? "normal" : average < 3.2 ? "red" : average <= 3.8 ? "yellow" : "normal"), "", "", "", cell("1. Разобрать лист План действий.\n2. Назначить ответственных по P1.\n3. Проверить комментарии с отметкой Внимание = Да.", STYLE.note), "", "", ""],
     [],
-    [cell("Топ проблем", STYLE.section), cell("Выборов", STYLE.section), cell("Доля", STYLE.section), cell("Зона", STYLE.section), cell("Самые слабые вопросы", STYLE.section), cell("Балл", STYLE.section), cell("Зона", STYLE.section), cell("Что делать", STYLE.section)],
-    ...Array.from({ length: Math.max(7, Math.min(10, Math.max(pStats.length, weakQuestions.length))) }, (_, index) => {
-      const problem = pStats[index];
-      const question = weakQuestions[index];
-      return [problem?.option ?? "", problem?.count ?? "", problem ? pct(problem.share) : "", problem ? byZone(zoneLabel(problem.zone), problem.zone) : "", question?.question ?? "", question?.average ?? "", question ? byZone(zoneLabel(question.zone), question.zone) : "", question ? CATEGORY_HELP[question.category]?.action ?? "Разобрать вручную" : ""];
-    })
+    [cell("Топ проблем", STYLE.section), cell("Выборов", STYLE.section), cell("Доля", STYLE.section), cell("Зона", STYLE.section), cell("Слабые оценочные вопросы", STYLE.section), cell("Балл", STYLE.section), cell("Зона", STYLE.section), cell("Что делать", STYLE.section)],
+    ...Array.from({ length: Math.max(problemRows.length, weakRows.length) }, (_, index) => [...(problemRows[index] ?? ["", "", "", ""]), ...(weakRows[index] ?? ["", "", "", ""])]),
   ];
 
   const actionRows: Cell[][] = [
-    ...qStats.filter((item) => item.type === "scale_1_5" && item.zone !== "normal").map((item, index) => [item.zone === "red" ? `P1-${index + 1}` : `P2-${index + 1}`, byZone(zoneLabel(item.zone), item.zone), "низкая оценка", item.categoryLabel, item.question, item.average ?? "", pct(item.lowShare), item.count, conclusion(item.zone), CATEGORY_HELP[item.category]?.action ?? "Разобрать вручную", "", "Новая", ""]),
+    ...qStats.filter((item) => item.type === "scale_1_5" && item.scoreCount > 0 && item.zone !== "normal").map((item, index) => [item.zone === "red" ? `P1-${index + 1}` : `P2-${index + 1}`, byZone(zoneLabel(item.zone), item.zone), "низкая оценка", item.categoryLabel, item.question, item.average ?? "", pct(item.lowShare), item.scoreCount, conclusion(item.zone), CATEGORY_HELP[item.category]?.action ?? "Разобрать вручную", "", "Новая", ""]),
     ...pStats.filter((item) => item.zone !== "normal").map((item, index) => [item.zone === "red" ? `P1-П${index + 1}` : `P2-П${index + 1}`, byZone(zoneLabel(item.zone), item.zone), "частый выбор", "Проблемы", item.option, "", "", item.count, item.check, item.action, "", "Новая", ""])
   ];
-
   const answersBySession = new Map<string, Map<string, any>>();
   for (const answer of answers) { const map = answersBySession.get(answer.session_id) ?? new Map<string, any>(); map.set(answer.question_code, answer); answersBySession.set(answer.session_id, map); }
 
   return buildXlsx([
     { name: "Дашборд HR", columns: [28, 12, 18, 12, 34, 12, 12, 48], rows: dashboardRows, merges: ["A1:H1", "A2:H2", "A8:D8", "E8:H8"], freeze: false },
     tableSheet("План действий", ["Приоритет", "Зона", "Тип", "Категория", "Проблема", "Балл", "Низкие", "Ответов", "Вывод", "Действие", "Ответственный", "Статус", "Комментарий HR"], actionRows, [12, 14, 16, 22, 48, 10, 12, 10, 42, 42, 18, 14, 30]),
-    tableSheet("Вопросы", ["№", "Категория", "Вопрос", "Ответов", "Балл", "1", "2", "3", "4", "5", "Низкие", "Высокие", "Зона", "Что делать"], qStats.map((item) => [item.position, item.categoryLabel, item.question, item.count, item.average ?? "", item.counts[1] ?? 0, item.counts[2] ?? 0, item.counts[3] ?? 0, item.counts[4] ?? 0, item.counts[5] ?? 0, item.type === "scale_1_5" ? pct(item.lowShare) : "", item.type === "scale_1_5" ? pct(item.highShare) : "", item.type === "scale_1_5" ? byZone(zoneLabel(item.zone), item.zone) : "", CATEGORY_HELP[item.category]?.action ?? "Разобрать вручную"]), [6, 24, 58, 10, 10, 6, 6, 6, 6, 6, 12, 12, 12, 44]),
+    tableSheet("Вопросы", ["№", "Категория", "Вопрос", "Ответов", "Балл", "1", "2", "3", "4", "5", "Низкие", "Высокие", "Зона", "Что делать"], qStats.map((item) => [item.position, item.categoryLabel, item.question, item.count, item.type === "scale_1_5" ? item.average ?? "" : "", item.counts[1] ?? 0, item.counts[2] ?? 0, item.counts[3] ?? 0, item.counts[4] ?? 0, item.counts[5] ?? 0, item.type === "scale_1_5" ? pct(item.lowShare) : "", item.type === "scale_1_5" ? pct(item.highShare) : "", item.type === "scale_1_5" && item.scoreCount > 0 ? byZone(zoneLabel(item.zone), item.zone) : "", item.type === "scale_1_5" ? CATEGORY_HELP[item.category]?.action ?? "Разобрать вручную" : "Не оценочный вопрос"]), [6, 24, 58, 10, 10, 6, 6, 6, 6, 6, 12, 12, 12, 44]),
     tableSheet("Категории", ["Категория", "Балл", "Ответов", "Низкие", "Зона", "Что означает", "Что делать"], cStats.map((item) => [item.label, item.average ?? "", item.count, pct(item.lowShare), byZone(zoneLabel(item.zone), item.zone), item.meaning, item.action]), [26, 10, 10, 12, 12, 50, 50]),
     tableSheet("Проблемы", ["Проблема", "Выборов", "Доля", "Зона", "Что проверить", "Рекомендуемое действие"], pStats.map((item) => [item.option, item.count, pct(item.share), byZone(zoneLabel(item.zone), item.zone), item.check, item.action]), [34, 10, 10, 12, 52, 52]),
     tableSheet("Комментарии", ["Дата", "Анкета", "Группа", "Роль", "Стаж", "Магазин/отдел", "Тип", "Комментарий", "Тема", "Внимание", "Комментарий HR"], comments.map((item) => [item.createdAt, item.sessionId, item.employeeGroup, item.employeeRole, item.tenure, item.store, item.type, item.comment, item.topic, item.attention === "Да" ? red("Да") : green("Нет"), ""]), [18, 12, 16, 18, 16, 20, 18, 70, 20, 12, 28]),
