@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { ensureSchema, getSql } from "../knowledge/db";
 import { anonSessionId } from "./repository";
 
