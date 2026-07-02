@@ -14,6 +14,7 @@ export async function ensureDefaultSurvey(): Promise<string> {
   const sql = getSql();
   await sql`INSERT INTO hr_surveys (id,title,description,status,anonymous) VALUES (${DEFAULT_HR_SURVEY.id},${DEFAULT_HR_SURVEY.title},${DEFAULT_HR_SURVEY.description},'draft',true) ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, description=EXCLUDED.description, anonymous=true, updated_at=now()`;
   for (const q of DEFAULT_HR_QUESTIONS) await sql`INSERT INTO hr_survey_questions (id,survey_id,position,code,text,category,type,options,required,max_choices) VALUES (${`${DEFAULT_HR_SURVEY_ID}-${q.position}`},${DEFAULT_HR_SURVEY_ID},${q.position},${q.code},${q.text},${q.category},${q.type},${JSON.stringify(q.options)}::jsonb,${q.required},${q.maxChoices}) ON CONFLICT (id) DO UPDATE SET position=EXCLUDED.position, code=EXCLUDED.code, text=EXCLUDED.text, category=EXCLUDED.category, type=EXCLUDED.type, options=EXCLUDED.options, required=EXCLUDED.required, max_choices=EXCLUDED.max_choices`;
+  await sql`DELETE FROM hr_survey_questions WHERE survey_id=${DEFAULT_HR_SURVEY_ID} AND position>${DEFAULT_HR_QUESTIONS.length}`;
   return DEFAULT_HR_SURVEY_ID;
 }
 
