@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getChatConfig, resolveTarget } from "../config/chats";
 import { handleKnowledgeUpdate } from "../knowledge/bot";
-import { handleMaxAdminCommand, handleSurveyAnswer, hasOpenSurveySession, isSurveyCommand, startOrContinueSurvey } from "../hrSurvey/bot";
+import { handleKnowledgeMenu, handleMaxAdminCommand, handleSurveyAnswer, hasOpenSurveySession, isMenuCommand, isSurveyCommand, sendMainMenu, startOrContinueSurvey } from "../hrSurvey/bot";
 import { sendMessage } from "../max/client";
 import { extractMaxUpdate } from "../max/updateExtractor";
 import { parsePriceMessage } from "../parser/priceParser";
@@ -52,7 +52,7 @@ async function processUpdate(update: MaxUpdate): Promise<void> {
   const extracted = extractMaxUpdate(update);
 
   if (extracted.updateType === "bot_started") {
-    await handleKnowledgeUpdate(extracted);
+    await sendMainMenu(extracted);
     return;
   }
   if (!isMessageCreated(extracted.updateType) || !extracted.text.trim()) return;
@@ -70,11 +70,16 @@ async function processUpdate(update: MaxUpdate): Promise<void> {
 
   const isPrivateDialog = Boolean(extracted.userId && extracted.chatId && !extracted.chatId.startsWith("-"));
   if (isPrivateDialog) {
+    if (isMenuCommand(extracted.text)) {
+      await sendMainMenu(extracted);
+      return;
+    }
     if (await handleMaxAdminCommand(extracted)) return;
     if (isSurveyCommand(extracted.text)) {
       await startOrContinueSurvey(extracted);
       return;
     }
+    if (await handleKnowledgeMenu(extracted)) return;
     if (await hasOpenSurveySession(extracted)) {
       await handleSurveyAnswer(extracted);
       return;
