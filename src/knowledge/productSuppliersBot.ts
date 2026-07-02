@@ -21,12 +21,6 @@ function keyboard(rows: string[][]): MaxAttachment[] {
   return [{ type: "inline_keyboard", payload: { buttons: rows.map((row) => row.map((text): MaxMessageButton => ({ type: "message", text }))) } }];
 }
 
-function pairRows(values: string[]): string[][] {
-  const rows: string[][] = [];
-  for (let index = 0; index < values.length; index += 2) rows.push(values.slice(index, index + 2));
-  return rows;
-}
-
 function norm(value: string): string {
   return value.toLowerCase()
     .replace(/ё/g, "е")
@@ -40,7 +34,7 @@ function cleanQuery(text: string): string {
   return norm(text
     .replace(/^(контакты|возвраты|возврат|отгрузка|отгрузки|юрлица|старые названия)\s*:?\s*/i, "")
     .replace(/^(поставщики менеджера|поставщики оператора|написать менеджеру|написать оператору)\s*:?\s*/i, "")
-    .replace(/\b(кто|какой|какая|какие|у|по|для|про|поставщик|поставщика|менеджер|оператор|отгрузка|отгрузки|возврат|возвраты|условия|доставляет|забирает|номер|телефон|контакт)\b/gi, " "));
+    .replace(/\b(кто|какой|какая|какие|у|по|для|про|поставщик|поставщика|менеджер|оператор|отгрузка|отгрузки|возврат|возвраты|условия|доставляет|забирает|номер|телефон|контакт)\b/gi, " "));
 }
 
 function supplierSearchBlob(supplier: ProductSupplier): string {
@@ -63,7 +57,7 @@ export function findProductSuppliers(query: string, limit = 5): ProductSupplier[
       return { supplier, score };
     })
     .filter((item) => item.score > 0)
-    .sort((left, right) => right.score - left.supplier.name.localeCompare(right.supplier.name, "ru"))
+    .sort((left, right) => right.score - left.score || left.supplier.name.localeCompare(right.supplier.name, "ru"))
     .slice(0, limit)
     .map((item) => item.supplier);
 }
@@ -104,22 +98,11 @@ function formatSupplierCard(supplier: ProductSupplier): string {
 }
 
 function formatContacts(supplier: ProductSupplier): string {
-  return [
-    `Контакты по поставщику: ${supplier.name}`,
-    `Менеджер: ${supplier.manager}`,
-    `Телефон менеджера: ${supplier.managerPhone}`,
-    `Оператор: ${supplier.operator}`,
-    `Телефон оператора: ${supplier.operatorPhone}`
-  ].join("\n");
+  return [`Контакты по поставщику: ${supplier.name}`, `Менеджер: ${supplier.manager}`, `Телефон менеджера: ${supplier.managerPhone}`, `Оператор: ${supplier.operator}`, `Телефон оператора: ${supplier.operatorPhone}`].join("\n");
 }
 
 function formatReturns(supplier: ProductSupplier): string {
-  return [
-    `Возвраты по поставщику: ${supplier.name}`,
-    `Как забирает: ${supplier.returnPickup}`,
-    `Когда передавать информацию: ${supplier.returnDeadline}`,
-    `Условия возврата: ${supplier.returnConditions}`
-  ].join("\n");
+  return [`Возвраты по поставщику: ${supplier.name}`, `Как забирает: ${supplier.returnPickup}`, `Когда передавать информацию: ${supplier.returnDeadline}`, `Условия возврата: ${supplier.returnConditions}`].join("\n");
 }
 
 function formatShipment(supplier: ProductSupplier): string {
@@ -209,10 +192,7 @@ async function sendSupplierResult(update: ExtractedMaxUpdate, supplier: ProductS
 }
 
 async function sendSearchResults(update: ExtractedMaxUpdate, matches: ProductSupplier[]): Promise<void> {
-  if (matches.length === 1) {
-    await sendSupplierResult(update, matches[0]!);
-    return;
-  }
+  if (matches.length === 1) { await sendSupplierResult(update, matches[0]!); return; }
   await sendMessage(target(update), `Нашёл несколько поставщиков. Выберите нужного:\n\n${matches.map((supplier, index) => `${index + 1}. ${supplier.name}`).join("\n")}`, {
     attachments: keyboard([...matches.slice(0, 8).map((supplier) => [shortName(supplier.name)]), [FIND_SUPPLIER, SUPPLIERS]])
   });
@@ -255,18 +235,11 @@ export async function handleProductSuppliersUpdate(update: ExtractedMaxUpdate): 
     const wantsReturn = /возврат|возвраты|условия|срок/i.test(text);
     const wantsShipment = /отгруз|график|достав/i.test(text);
     const wantsContact = /менеджер|оператор|контакт|телефон|номер/i.test(text);
-    if (matches.length === 1) {
-      await sendSupplierResult(update, matches[0]!, wantsReturn ? "returns" : wantsShipment ? "shipment" : wantsContact ? "contacts" : "card");
-      return true;
-    }
+    if (matches.length === 1) { await sendSupplierResult(update, matches[0]!, wantsReturn ? "returns" : wantsShipment ? "shipment" : wantsContact ? "contacts" : "card"); return true; }
     await sendSearchResults(update, matches);
     return true;
   }
 
-  if (/поставщик|поставщика|возврат|отгруз|менеджер|оператор/i.test(text) && /продукт|продукты|товар/i.test(text)) {
-    await sendSuppliersMenu(update);
-    return true;
-  }
-
+  if (/поставщик|поставщика|возврат|отгруз|менеджер|оператор/i.test(text) && /продукт|продукты|товар/i.test(text)) { await sendSuppliersMenu(update); return true; }
   return false;
 }
