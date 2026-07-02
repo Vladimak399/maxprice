@@ -9,6 +9,18 @@ const toSurvey = (r: any): HrSurvey => ({ id: r.id, title: r.title, description:
 const toQuestion = (r: any): HrSurveyQuestion => ({ id: r.id, surveyId: r.survey_id, position: Number(r.position), code: r.code, text: r.text, category: r.category, type: r.type, options: Array.isArray(r.options) ? r.options : [], required: r.required, maxChoices: r.max_choices === null ? null : Number(r.max_choices) });
 export function anonSessionId(sessionId: string): string { return createHash("sha256").update(sessionId).digest("hex").slice(0, 12); }
 
+export async function rememberMaxBotUser(userId: string | null, chatId: string | null): Promise<void> {
+  if (!userId) return;
+  await ensureSchema();
+  await getSql()`INSERT INTO max_bot_users (user_id,chat_id,active,last_seen_at) VALUES (${userId},${chatId},true,now()) ON CONFLICT (user_id) DO UPDATE SET chat_id=COALESCE(EXCLUDED.chat_id,max_bot_users.chat_id), active=true, last_seen_at=now()`;
+}
+
+export async function listKnownBotUsers(): Promise<Array<{ userId: string; chatId: string | null; lastSeenAt: string }>> {
+  await ensureSchema();
+  const rows = await getSql()`SELECT user_id,chat_id,last_seen_at FROM max_bot_users WHERE active=true ORDER BY last_seen_at DESC` as any[];
+  return rows.map((row) => ({ userId: row.user_id, chatId: row.chat_id, lastSeenAt: new Date(row.last_seen_at).toISOString() }));
+}
+
 export async function ensureDefaultSurvey(): Promise<string> {
   await ensureSchema();
   const sql = getSql();
@@ -57,4 +69,4 @@ export async function getAnalytics(surveyId: string) {
 export async function listMaxAdmins() { await ensureSchema(); return await getSql()`SELECT id,user_id,name,active,created_at FROM max_admin_users ORDER BY created_at DESC`; }
 export async function upsertMaxAdmin(userId: string, name: string | null) { await ensureSchema(); await getSql()`INSERT INTO max_admin_users (user_id,name,active) VALUES (${userId},${name},true) ON CONFLICT (user_id) DO UPDATE SET name=EXCLUDED.name, active=true`; }
 export async function isMaxAdmin(userId: string) { await ensureSchema(); const rows = await getSql()`SELECT 1 FROM max_admin_users WHERE user_id=${userId} AND active=true LIMIT 1` as any[]; return Boolean(rows[0]); }
-export async function getSurveyDiagnostics() { await ensureSchema(); const active = await getActiveSurvey(); const surveys = await listSurveys(); const activeQuestionCount = active ? (await getQuestions(active.id)).length : 0; return { databaseConfigured: true, defaultSurveyCreated: surveys.some((s) => s.id === DEFAULT_HR_SURVEY_ID), activeSurveyId: active?.id ?? null, activeQuestionCount, surveyHashSaltConfigured: Boolean(getSurveyHashSalt()), adminBaseUrlConfigured: Boolean(process.env.ADMIN_BASE_URL?.trim()), defaultQuestionCount: DEFAULT_HR_QUESTIONS.length }; }
+export async function getSurveyDiagnostics() { await ensureSchema(); const active = await getActiveSurvey(); const surveys = await listSurveys(); const activeQuestionCount = active ? (await getQuestions(active.id)).length : 0; const knownUsers = await listKnownBotUsers(); return { databaseConfigured: true, defaultSurveyCreated: surveys.some((s) => s.id === DEFAULT_HR_SURVEY_ID), activeSurveyId: active?.id ?? null, activeQuestionCount, surveyHashSaltConfigured: Boolean(getSurveyHashSalt()), adminBaseUrlConfigured: Boolean(process.env.ADMIN_BASE_URL?.trim()), defaultQuestionCount: DEFAULT_HR_QUESTIONS.length, knownBotUsers: knownUsers.length }; }
