@@ -102,13 +102,18 @@ async function createSchema(): Promise<void> {
     employee_role text,
     tenure text,
     store_or_department text,
+    attempt_no integer NOT NULL DEFAULT 1,
     current_question_position integer NOT NULL DEFAULT 1,
     completed boolean NOT NULL DEFAULT false,
     started_at timestamptz NOT NULL DEFAULT now(),
     completed_at timestamptz,
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (survey_id, user_hash)
+    updated_at timestamptz NOT NULL DEFAULT now()
   )`;
+  await sql`ALTER TABLE hr_survey_sessions ADD COLUMN IF NOT EXISTS attempt_no integer NOT NULL DEFAULT 1`;
+  await sql`ALTER TABLE hr_survey_sessions DROP CONSTRAINT IF EXISTS hr_survey_sessions_survey_id_user_hash_key`;
+  await sql`UPDATE hr_survey_sessions SET attempt_no=1 WHERE attempt_no IS NULL`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS hr_survey_sessions_survey_user_attempt_idx ON hr_survey_sessions(survey_id, user_hash, attempt_no)`;
+  await sql`CREATE INDEX IF NOT EXISTS hr_survey_sessions_open_idx ON hr_survey_sessions(survey_id, user_hash, completed)`;
   await sql`CREATE TABLE IF NOT EXISTS hr_survey_answers (
     id bigserial PRIMARY KEY,
     session_id text NOT NULL REFERENCES hr_survey_sessions(id) ON DELETE CASCADE,
