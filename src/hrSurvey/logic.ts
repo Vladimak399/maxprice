@@ -1,9 +1,17 @@
 import { createHash } from "node:crypto";
 import type { HrSurveyQuestion, ParsedAnswer } from "./types";
 
-export function getSurveyHashSalt(): string | null { return process.env.SURVEY_HASH_SALT?.trim() || null; }
+const SURVEY_SALT_ENV_KEYS = ["SURVEY_HASH_SALT", "MAX_WEBHOOK_SECRET", "ADMIN_SECRET", "MAX_BOT_TOKEN"] as const;
+
+export function getSurveyHashSalt(): string | null {
+  for (const key of SURVEY_SALT_ENV_KEYS) {
+    const value = process.env[key]?.trim();
+    if (value) return value;
+  }
+  return null;
+}
 export function hashSurveyUserId(userId: string, salt = getSurveyHashSalt()): string {
-  if (!salt) throw new Error("SURVEY_HASH_SALT не задан: HR-опросы недоступны");
+  if (!salt) throw new Error("Не задан секрет для анонимизации HR-опросов");
   return createHash("sha256").update(`${userId}${salt}`).digest("hex");
 }
 export function scoreZone(avg: number): "red"|"yellow"|"normal" { return avg < 3.2 ? "red" : avg <= 3.8 ? "yellow" : "normal"; }

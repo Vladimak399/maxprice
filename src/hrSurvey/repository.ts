@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { ensureSchema, getSql } from "../knowledge/db";
 import { DEFAULT_HR_QUESTIONS, DEFAULT_HR_SURVEY, DEFAULT_HR_SURVEY_ID } from "./defaultSurvey";
-import { scoreZone } from "./logic";
+import { getSurveyHashSalt, scoreZone } from "./logic";
 import type { HrSurvey, HrSurveyQuestion, SurveyAnalytics, SurveyStats } from "./types";
 
 const toSurvey = (r: any): HrSurvey => ({ id:r.id, title:r.title, description:r.description, status:r.status, anonymous:r.anonymous, createdAt:new Date(r.created_at).toISOString(), updatedAt:new Date(r.updated_at).toISOString() });
@@ -22,4 +22,4 @@ export async function listMaxAdmins(){ await ensureSchema(); return await getSql
 export async function upsertMaxAdmin(userId:string,name:string|null){ await ensureSchema(); await getSql()`INSERT INTO max_admin_users (user_id,name,active) VALUES (${userId},${name},true) ON CONFLICT (user_id) DO UPDATE SET name=EXCLUDED.name, active=true`; }
 export async function isMaxAdmin(userId:string){ await ensureSchema(); const rows=await getSql()`SELECT 1 FROM max_admin_users WHERE user_id=${userId} AND active=true LIMIT 1` as any[]; return Boolean(rows[0]); }
 
-export async function getSurveyDiagnostics(){ await ensureSchema(); const sql=getSql(); const active=await getActiveSurvey(); const surveys=await listSurveys(); const activeQuestionCount=active ? (await getQuestions(active.id)).length : 0; return { databaseConfigured:true, defaultSurveyCreated:surveys.some(s=>s.id===DEFAULT_HR_SURVEY_ID), activeSurveyId:active?.id ?? null, activeQuestionCount, surveyHashSaltConfigured:Boolean(process.env.SURVEY_HASH_SALT?.trim()), adminBaseUrlConfigured:Boolean(process.env.ADMIN_BASE_URL?.trim()), defaultQuestionCount:DEFAULT_HR_QUESTIONS.length }; }
+export async function getSurveyDiagnostics(){ await ensureSchema(); const sql=getSql(); const active=await getActiveSurvey(); const surveys=await listSurveys(); const activeQuestionCount=active ? (await getQuestions(active.id)).length : 0; return { databaseConfigured:true, defaultSurveyCreated:surveys.some(s=>s.id===DEFAULT_HR_SURVEY_ID), activeSurveyId:active?.id ?? null, activeQuestionCount, surveyHashSaltConfigured:Boolean(getSurveyHashSalt()), adminBaseUrlConfigured:Boolean(process.env.ADMIN_BASE_URL?.trim()), defaultQuestionCount:DEFAULT_HR_QUESTIONS.length }; }

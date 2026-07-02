@@ -2,7 +2,7 @@ import { sendMessage } from "../max/client";
 import type { ExtractedMaxUpdate, MaxAttachment, MaxMessageButton } from "../types/max";
 import { isDatabaseConfigured } from "../knowledge/db";
 import { getSurveyHashSalt, hashSurveyUserId, parseSurveyAnswer } from "./logic";
-import { completeSession, findOpenSession, findOrCreateSession, getActiveSurvey, getQuestion, isMaxAdmin, saveAnswer } from "./repository";
+import { completeSession, ensureDefaultSurvey, findOpenSession, findOrCreateSession, getActiveSurvey, getQuestion, isMaxAdmin, saveAnswer, setSurveyStatus } from "./repository";
 
 const SURVEY_COMMANDS = new Set(["опрос", "/survey", "начать опрос", "пройти опрос", "hr-опрос", "/start_survey"]);
 const MENU_COMMANDS = new Set(["/start", "start", "меню", "помощь"]);
@@ -60,9 +60,14 @@ export async function startOrContinueSurvey(update: ExtractedMaxUpdate): Promise
   if (!update.userId) { await sendMessage(target(update), "Опрос можно пройти только в личном чате с ботом."); return; }
   let userHash: string;
   try { userHash = hashSurveyUserId(update.userId); }
-  catch (e) { console.error(e); await sendMessage(target(update), "Опрос временно недоступен: не настроена анонимизация. Администратору нужно добавить SURVEY_HASH_SALT в переменные окружения Vercel."); return; }
-  const survey = await getActiveSurvey();
-  if (!survey) { await sendMessage(target(update), "Сейчас активных опросов нет. Администратору нужно открыть /admin → Опросы → Создать дефолтный HR-опрос → Активировать."); return; }
+  catch (e) { console.error(e); await sendMessage(target(update), "Опрос временно недоступен: не настроена анонимизация. Администратору нужно добавить SURVEY_HASH_SALT или проверить секреты бота в переменных окружения Vercel."); return; }
+  let survey = await getActiveSurvey();
+  if (!survey) {
+    const defaultSurveyId = await ensureDefaultSurvey();
+    await setSurveyStatus(defaultSurveyId, "active");
+    survey = await getActiveSurvey();
+  }
+  if (!survey) { await sendMessage(target(update), "Сейчас не удалось открыть HR-опрос автоматически. Попробуйте позже или обратитесь к администратору."); return; }
   const session = await findOrCreateSession(survey.id, userHash, update.chatId ? hashSurveyUserId(update.chatId) : null);
   if (session.completed) { await sendMessage(target(update), "Вы уже прошли этот опрос. Спасибо."); return; }
   if (Number(session.current_question_position) === 1) await sendMessage(target(update), `${survey.title}\n\n${survey.description ?? ""}`);
