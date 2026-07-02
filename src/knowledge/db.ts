@@ -68,6 +68,69 @@ async function createSchema(): Promise<void> {
     updated_at timestamptz NOT NULL DEFAULT now()
   )`;
 
+  await sql`CREATE TABLE IF NOT EXISTS hr_surveys (
+    id text PRIMARY KEY,
+    title text NOT NULL,
+    description text,
+    status text NOT NULL CHECK (status IN ('draft', 'active', 'closed')),
+    anonymous boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS hr_survey_questions (
+    id text PRIMARY KEY,
+    survey_id text NOT NULL REFERENCES hr_surveys(id) ON DELETE CASCADE,
+    position integer NOT NULL,
+    code text NOT NULL,
+    text text NOT NULL,
+    category text NOT NULL,
+    type text NOT NULL CHECK (type IN ('scale_1_5', 'single_choice', 'multi_choice', 'text')),
+    options jsonb NOT NULL DEFAULT '[]'::jsonb,
+    required boolean NOT NULL DEFAULT true,
+    max_choices integer,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (survey_id, position),
+    UNIQUE (survey_id, code)
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS hr_survey_sessions (
+    id text PRIMARY KEY,
+    survey_id text NOT NULL REFERENCES hr_surveys(id) ON DELETE CASCADE,
+    user_hash text NOT NULL,
+    chat_hash text,
+    source_chat_id text,
+    employee_group text,
+    employee_role text,
+    tenure text,
+    store_or_department text,
+    current_question_position integer NOT NULL DEFAULT 1,
+    completed boolean NOT NULL DEFAULT false,
+    started_at timestamptz NOT NULL DEFAULT now(),
+    completed_at timestamptz,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (survey_id, user_hash)
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS hr_survey_answers (
+    id bigserial PRIMARY KEY,
+    session_id text NOT NULL REFERENCES hr_survey_sessions(id) ON DELETE CASCADE,
+    survey_id text NOT NULL REFERENCES hr_surveys(id) ON DELETE CASCADE,
+    question_id text NOT NULL REFERENCES hr_survey_questions(id) ON DELETE CASCADE,
+    question_code text NOT NULL,
+    question_text text NOT NULL,
+    category text NOT NULL,
+    answer_text text,
+    answer_number numeric,
+    answer_json jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (session_id, question_id)
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS max_admin_users (
+    id bigserial PRIMARY KEY,
+    user_id text NOT NULL UNIQUE,
+    name text,
+    active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`;
+
   const categories = [
     ["returns", "returns", "Возвраты", 10],
     ["cash", "cash", "Касса", 20],

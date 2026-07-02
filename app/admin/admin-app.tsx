@@ -10,8 +10,13 @@ type AdminData = {
   articles: KnowledgeArticle[];
   unanswered: UnansweredQuestion[];
 };
+type SurveyData = {
+  surveys: Array<{ id: string; title: string; status: "draft" | "active" | "closed"; createdAt: string; stats: { started: number; completed: number } }>;
+  activeSurvey: { id: string } | null;
+  analytics: null | { started: number; completed: number; completionRate: number; scaleAverage: number | null; categories: Array<{ category: string; average: number; count: number; zone: "red" | "yellow" | "normal" }>; problems: Array<{ question: string; option: string; count: number; share: number }>; comments: Array<{ question: string; answer: string; sessionAnonId: string }> };
+};
 
-type Tab = "articles" | "unanswered" | "import" | "categories";
+type Tab = "articles" | "unanswered" | "import" | "categories" | "surveys";
 type Notice = { tone: "error" | "success"; text: string } | null;
 
 const EMPTY_STATS: KnowledgeStats = { articles: 0, published: 0, unanswered: 0, helpful: 0, unhelpful: 0 };
@@ -250,6 +255,63 @@ function ImportPanel({ categories, onImported }: { categories: KnowledgeCategory
   );
 }
 
+function SurveysPanel() {
+  const [data, setData] = useState<SurveyData>({ surveys: [], activeSurvey: null, analytics: null });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try { setData(await api<SurveyData>("/api/admin/surveys")); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Не удалось загрузить опросы"); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  async function action(actionName: string, id?: string) {
+    await api("/api/admin/surveys", { method: "POST", body: JSON.stringify({ action: actionName, id }) });
+    await load();
+  }
+  const tone = (zone: string) => zone === "red" ? "text-red-700 bg-red-50 border-red-200" : zone === "yellow" ? "text-amber-700 bg-amber-50 border-amber-200" : "text-emerald-800 bg-emerald-50 border-emerald-200";
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div><h2 className="text-2xl font-semibold tracking-tight">Опросы</h2><p className="mt-2 text-sm text-zinc-600">Анонимные HR-опросы сотрудников через MAX-бота.</p></div>
+        <button className="button-primary" onClick={() => void action("survey.ensureDefault")}>Создать дефолтный HR-опрос</button>
+      </div>
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+      <div className="grid gap-4">
+        {loading && <p className="text-sm text-zinc-500">Загружаем…</p>}
+        {data.surveys.map((survey) => (
+          <article className="rounded-2xl border border-zinc-200 bg-white p-5" key={survey.id}>
+            <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+              <div><h3 className="font-semibold">{survey.title}</h3><p className="mt-1 text-sm text-zinc-500">Статус: {survey.status} · Начато: {survey.stats.started} · Завершено: {survey.stats.completed} · Создан: {new Date(survey.createdAt).toLocaleDateString("ru-RU")}</p></div>
+              <div className="flex flex-wrap gap-2">
+                <a className="button-secondary" href={`/api/admin/surveys/export?surveyId=${encodeURIComponent(survey.id)}`}>Скачать Excel</a>
+                <button className="button-secondary" onClick={() => void action("survey.activate", survey.id)}>Активировать</button>
+                <button className="button-secondary" onClick={() => void action("survey.close", survey.id)}>Закрыть</button>
+              </div>
+            </div>
+          </article>
+        ))}
+        {!loading && data.surveys.length === 0 && <p className="rounded-2xl border border-zinc-200 p-8 text-center text-sm text-zinc-500">Опросов пока нет.</p>}
+      </div>
+      {data.analytics && (
+        <section className="rounded-2xl border border-zinc-200 bg-white p-5">
+          <h3 className="text-xl font-semibold">Сводка</h3>
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            {[["Начато", data.analytics.started], ["Завершено", data.analytics.completed], ["Завершение", `${data.analytics.completionRate}%`], ["Средний балл", data.analytics.scaleAverage ?? "—"]].map(([label, value]) => <div className="rounded-xl bg-zinc-50 p-4" key={label}><p className="text-xs text-zinc-500">{label}</p><p className="mt-1 text-2xl font-semibold">{value}</p></div>)}
+          </div>
+          <h4 className="mt-6 font-semibold">Категории</h4>
+          <div className="mt-3 grid gap-2 md:grid-cols-3">{data.analytics.categories.map((c) => <div className={`rounded-xl border px-3 py-2 text-sm ${tone(c.zone)}`} key={c.category}>{c.category}: {c.average} ({c.count})</div>)}</div>
+          <h4 className="mt-6 font-semibold">Проблемы</h4>
+          <div className="mt-3 divide-y divide-zinc-100">{data.analytics.problems.slice(0, 30).map((p) => <p className="py-2 text-sm" key={`${p.question}-${p.option}`}>{p.option}: <b>{p.count}</b> ({p.share}%)</p>)}</div>
+          <h4 className="mt-6 font-semibold">Открытые комментарии</h4>
+          <div className="mt-3 space-y-3">{data.analytics.comments.slice(0, 20).map((c) => <blockquote className="rounded-xl bg-zinc-50 p-3 text-sm" key={`${c.sessionAnonId}-${c.question}`}>“{c.answer}”<footer className="mt-1 text-xs text-zinc-500">{c.question}</footer></blockquote>)}</div>
+        </section>
+      )}
+    </div>
+  );
+}
+
 export function AdminApp() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [data, setData] = useState<AdminData>({ stats: EMPTY_STATS, categories: [], articles: [], unanswered: [] });
@@ -285,7 +347,8 @@ export function AdminApp() {
     ["articles", "Инструкции", data.articles.length],
     ["unanswered", "Без ответа", data.stats.unanswered],
     ["import", "Импорт", null],
-    ["categories", "Категории", data.categories.length]
+    ["categories", "Категории", data.categories.length],
+    ["surveys", "Опросы", null]
   ], [data]);
 
   if (authenticated === null || (authenticated && loading && data.categories.length === 0 && !error)) return <div className="min-h-[100dvh] animate-pulse bg-zinc-100" />;
@@ -364,6 +427,7 @@ export function AdminApp() {
               </div>
             </div>
           )}
+          {tab === "surveys" && <SurveysPanel />}
         </section>
       </div>
     </main>
