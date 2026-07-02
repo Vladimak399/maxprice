@@ -11,8 +11,9 @@ type AdminData = {
   unanswered: UnansweredQuestion[];
 };
 type SurveyData = {
-  surveys: Array<{ id: string; title: string; status: "draft" | "active" | "closed"; createdAt: string; stats: { started: number; completed: number } }>;
+  surveys: Array<{ id: string; title: string; status: "draft" | "active" | "closed"; createdAt: string; stats: { started: number; completed: number }; questionCount: number }>;
   activeSurvey: { id: string } | null;
+  diagnostics?: { databaseConfigured: boolean; defaultSurveyCreated: boolean; activeSurveyId: string | null; activeQuestionCount: number; surveyHashSaltConfigured: boolean; adminBaseUrlConfigured: boolean; defaultQuestionCount: number };
   analytics: null | { started: number; completed: number; completionRate: number; scaleAverage: number | null; categories: Array<{ category: string; average: number; count: number; zone: "red" | "yellow" | "normal" }>; problems: Array<{ question: string; option: string; count: number; share: number }>; comments: Array<{ question: string; answer: string; sessionAnonId: string }> };
 };
 
@@ -275,19 +276,27 @@ function SurveysPanel() {
     <div className="space-y-8">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div><h2 className="text-2xl font-semibold tracking-tight">Опросы</h2><p className="mt-2 text-sm text-zinc-600">Анонимные HR-опросы сотрудников через MAX-бота.</p></div>
-        <button className="button-primary" onClick={() => void action("survey.ensureDefault")}>Создать дефолтный HR-опрос</button>
+        <div className="flex flex-wrap gap-2"><button className="button-primary" onClick={() => void action("survey.ensureDefault")}>Создать дефолтный HR-опрос</button><button className="button-secondary" onClick={() => void load()}>Обновить данные</button></div>
       </div>
+      <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-950">
+        <h3 className="font-semibold">Как запустить опрос</h3>
+        <ol className="mt-3 list-decimal space-y-1 pl-5"><li>Нажмите «Создать дефолтный HR-опрос».</li><li>Нажмите «Активировать опрос».</li><li>Сотрудник пишет боту в личку <code>опрос</code> или нажимает «Пройти опрос» в меню.</li><li>После прохождения ответы появятся в сводке.</li><li>Excel можно скачать кнопкой «Скачать Excel».</li></ol>
+        <p className="mt-3">Переменные окружения: <code>SURVEY_HASH_SALT</code> нужна для анонимизации, <code>ADMIN_BASE_URL</code> — для ссылки по команде /admin. Секреты ниже не показываются, только статус настройки.</p>
+      </section>
+      {data.diagnostics && <section className="rounded-2xl border border-zinc-200 bg-white p-5 text-sm"><h3 className="font-semibold">Диагностика</h3><div className="mt-3 grid gap-2 md:grid-cols-3">
+        {[["База подключена", data.diagnostics.databaseConfigured], ["Дефолтный опрос создан", data.diagnostics.defaultSurveyCreated], ["Есть активный опрос", Boolean(data.diagnostics.activeSurveyId)], ["Вопросов в активном", data.diagnostics.activeQuestionCount || "—"], ["SURVEY_HASH_SALT задан", data.diagnostics.surveyHashSaltConfigured], ["ADMIN_BASE_URL задан", data.diagnostics.adminBaseUrlConfigured]].map(([label, value]) => <div className="rounded-xl bg-zinc-50 p-3" key={String(label)}><span className="text-zinc-500">{label}: </span><b>{typeof value === "boolean" ? (value ? "да" : "нет") : value}</b></div>)}
+      </div></section>}
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
       <div className="grid gap-4">
         {loading && <p className="text-sm text-zinc-500">Загружаем…</p>}
         {data.surveys.map((survey) => (
           <article className="rounded-2xl border border-zinc-200 bg-white p-5" key={survey.id}>
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
-              <div><h3 className="font-semibold">{survey.title}</h3><p className="mt-1 text-sm text-zinc-500">Статус: {survey.status} · Начато: {survey.stats.started} · Завершено: {survey.stats.completed} · Создан: {new Date(survey.createdAt).toLocaleDateString("ru-RU")}</p></div>
+              <div><h3 className="font-semibold">{survey.title}</h3><p className="mt-1 text-sm text-zinc-500">Статус: {survey.status} · Вопросов: {survey.questionCount} · Начато: {survey.stats.started} · Завершено: {survey.stats.completed} · Завершение: {survey.stats.started ? Math.round(survey.stats.completed / survey.stats.started * 100) : 0}% · Создан: {new Date(survey.createdAt).toLocaleDateString("ru-RU")}</p></div>
               <div className="flex flex-wrap gap-2">
                 <a className="button-secondary" href={`/api/admin/surveys/export?surveyId=${encodeURIComponent(survey.id)}`}>Скачать Excel</a>
-                <button className="button-secondary" onClick={() => void action("survey.activate", survey.id)}>Активировать</button>
-                <button className="button-secondary" onClick={() => void action("survey.close", survey.id)}>Закрыть</button>
+                <button className="button-secondary" disabled={survey.status === "active"} onClick={() => void action("survey.activate", survey.id)}>{survey.status === "active" ? "Опрос активен" : "Активировать опрос"}</button>
+                <button className="button-secondary" onClick={() => void action("survey.close", survey.id)}>Закрыть опрос</button>
               </div>
             </div>
           </article>

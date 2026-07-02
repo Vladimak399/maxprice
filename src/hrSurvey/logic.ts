@@ -13,16 +13,16 @@ export function parseSurveyAnswer(question: HrSurveyQuestion, raw: string): Pars
   if (!question.required && (!value || value.toLowerCase() === "пропустить")) return { answerText: null, answerNumber: null, answerJson: null, profileField: profileField(question.code), profileValue: null };
   if (question.type === "scale_1_5") {
     const number = Number(value.replace(",", "."));
-    if (!Number.isInteger(number) || number < 1 || number > 5) throw new Error("Выберите оценку от 1 до 5.");
+    if (!Number.isInteger(number) || number < 1 || number > 5) throw new Error("Нужно нажать кнопку или написать цифру от 1 до 5.");
     return { answerText: String(number), answerNumber: number, answerJson: null };
   }
   if (question.type === "single_choice") {
     const match = question.options.find((option) => option.toLowerCase() === value.toLowerCase());
-    if (!match) throw new Error("Выберите один из вариантов кнопкой или текстом.");
+    if (!match) throw new Error(`Выберите один из вариантов: ${question.options.join(", ")}.`);
     return { answerText: match, answerNumber: null, answerJson: null, profileField: profileField(question.code), profileValue: match };
   }
   if (question.type === "multi_choice") {
-    const indexes = value.split(/[,.،;\s]+/).map((part) => Number(part.trim())).filter(Number.isInteger);
+    const indexes = value.split(/[,.;،;\s]+/).map((part) => Number(part.trim())).filter(Number.isInteger);
     const unique = [...new Set(indexes)];
     if (unique.length === 0) throw new Error("Напишите номера вариантов через запятую, например: 1, 3, 5.");
     if (question.maxChoices && unique.length > question.maxChoices) throw new Error(`Можно выбрать не больше ${question.maxChoices} вариантов.`);
