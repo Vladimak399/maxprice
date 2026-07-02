@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_HR_QUESTIONS } from "../src/hrSurvey/defaultSurvey";
 import { FORBIDDEN_EXPORT_COLUMNS } from "../src/hrSurvey/export";
-import { hashSurveyUserId, parseSurveyAnswer, scoreZone } from "../src/hrSurvey/logic";
+import { getSurveyHashSalt, hashSurveyUserId, parseSurveyAnswer, scoreZone } from "../src/hrSurvey/logic";
 import { isMenuCommand, isSurveyCommand } from "../src/hrSurvey/bot";
 import type { HrSurveyQuestion } from "../src/hrSurvey/types";
 
@@ -34,6 +34,21 @@ describe("hr survey logic", () => {
   it("hashes user id with salt", () => {
     expect(hashSurveyUserId("123", "salt")).toHaveLength(64);
     expect(hashSurveyUserId("123", "salt")).not.toBe(hashSurveyUserId("123", "other"));
+  });
+  it("uses existing bot secrets as an anonymization fallback", () => {
+    const originalSurveySalt = process.env.SURVEY_HASH_SALT;
+    const originalWebhookSecret = process.env.MAX_WEBHOOK_SECRET;
+    try {
+      delete process.env.SURVEY_HASH_SALT;
+      process.env.MAX_WEBHOOK_SECRET = "webhook-secret";
+      expect(getSurveyHashSalt()).toBe("webhook-secret");
+      expect(hashSurveyUserId("123")).toBe(hashSurveyUserId("123", "webhook-secret"));
+    } finally {
+      if (originalSurveySalt === undefined) delete process.env.SURVEY_HASH_SALT;
+      else process.env.SURVEY_HASH_SALT = originalSurveySalt;
+      if (originalWebhookSecret === undefined) delete process.env.MAX_WEBHOOK_SECRET;
+      else process.env.MAX_WEBHOOK_SECRET = originalWebhookSecret;
+    }
   });
   it("does not define technical export columns", () => {
     for (const column of ["user_hash", "chat_hash", "source_chat_id", "user_id", "chat_id"]) expect(FORBIDDEN_EXPORT_COLUMNS).toContain(column);
