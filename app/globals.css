@@ -9,23 +9,68 @@
 
 body {
   margin: 0;
-  background: #f7f7f5;
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(23, 107, 85, 0.07), transparent 28rem),
+    #f7f7f5;
   color: #18181b;
+  font-family: "Geist", "Segoe UI", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
+::selection { background: rgba(23, 107, 85, 0.18); }
+
+main > header {
+  border: 1px solid #27272a;
+  border-radius: 2rem;
+  background: #18181b;
+  padding: 1.5rem;
+  color: #fafafa;
+  box-shadow: 0 24px 70px -44px rgba(24, 24, 27, 0.7);
+}
+
+main > header p:first-child { color: #6ee7b7; }
+main > header .button-secondary {
+  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fafafa;
+}
+main > header .button-secondary:hover { background: rgba(255, 255, 255, 0.12); }
+main > header button:last-child { color: #a1a1aa; }
+
+main > div.grid > nav {
+  border: 1px solid #e4e4e7;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 0.5rem;
+  box-shadow: 0 16px 50px -38px rgba(24, 24, 27, 0.35);
+  backdrop-filter: blur(12px);
+}
+
+@media (min-width: 1024px) {
+  main > div.grid > nav {
+    position: sticky;
+    top: 1rem;
+    align-self: start;
+  }
+}
 
 @layer components {
   .field {
     @apply w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/10;
+    min-height: 2.75rem;
   }
 
   .button-primary {
     @apply rounded-xl bg-emerald-800 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-900 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50;
+    min-height: 2.75rem;
   }
 
   .button-secondary {
     @apply rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50;
+    min-height: 2.75rem;
   }
 }

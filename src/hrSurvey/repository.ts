@@ -25,8 +25,15 @@ export async function ensureDefaultSurvey(): Promise<string> {
   await ensureSchema();
   const sql = getSql();
   await sql`INSERT INTO hr_surveys (id,title,description,status,anonymous) VALUES (${DEFAULT_HR_SURVEY.id},${DEFAULT_HR_SURVEY.title},${DEFAULT_HR_SURVEY.description},'draft',true) ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, description=EXCLUDED.description, anonymous=true, updated_at=now()`;
-  for (const q of DEFAULT_HR_QUESTIONS) await sql`INSERT INTO hr_survey_questions (id,survey_id,position,code,text,category,type,options,required,max_choices) VALUES (${`${DEFAULT_HR_SURVEY_ID}-${q.position}`},${DEFAULT_HR_SURVEY_ID},${q.position},${q.code},${q.text},${q.category},${q.type},${JSON.stringify(q.options)}::jsonb,${q.required},${q.maxChoices}) ON CONFLICT (id) DO UPDATE SET position=EXCLUDED.position, code=EXCLUDED.code, text=EXCLUDED.text, category=EXCLUDED.category, type=EXCLUDED.type, options=EXCLUDED.options, required=EXCLUDED.required, max_choices=EXCLUDED.max_choices`;
-  await sql`DELETE FROM hr_survey_questions WHERE survey_id=${DEFAULT_HR_SURVEY_ID} AND position>${DEFAULT_HR_QUESTIONS.length}`;
+  const sessions = await sql`SELECT count(*)::int count FROM hr_survey_sessions WHERE survey_id=${DEFAULT_HR_SURVEY_ID}` as Array<{ count: number }>;
+  if (Number(sessions[0]?.count ?? 0) > 0) return DEFAULT_HR_SURVEY_ID;
+
+  await sql`UPDATE hr_survey_questions SET position=position+10000 WHERE survey_id=${DEFAULT_HR_SURVEY_ID}`;
+  for (const q of DEFAULT_HR_QUESTIONS) {
+    await sql`INSERT INTO hr_survey_questions (id,survey_id,position,code,text,category,type,options,required,max_choices) VALUES (${`${DEFAULT_HR_SURVEY_ID}-${q.code}`},${DEFAULT_HR_SURVEY_ID},${q.position},${q.code},${q.text},${q.category},${q.type},${JSON.stringify(q.options)}::jsonb,${q.required},${q.maxChoices}) ON CONFLICT (survey_id,code) DO UPDATE SET position=EXCLUDED.position, text=EXCLUDED.text, category=EXCLUDED.category, type=EXCLUDED.type, options=EXCLUDED.options, required=EXCLUDED.required, max_choices=EXCLUDED.max_choices`;
+  }
+  const codes = DEFAULT_HR_QUESTIONS.map((question) => question.code);
+  await sql`DELETE FROM hr_survey_questions WHERE survey_id=${DEFAULT_HR_SURVEY_ID} AND NOT (code = ANY(${codes}))`;
   return DEFAULT_HR_SURVEY_ID;
 }
 
@@ -45,7 +52,10 @@ export async function findOrCreateSession(surveyId: string, userHash: string, ch
   await ensureSchema();
   const sql = getSql();
   const openRows = await sql`SELECT * FROM hr_survey_sessions WHERE survey_id=${surveyId} AND user_hash=${userHash} AND completed=false ORDER BY updated_at DESC LIMIT 1` as any[];
-  if (openRows[0]) return openRows[0];
+  if (openRows[0]) {
+    const rows = await sql`UPDATE hr_survey_sessions SET paused=false, updated_at=now() WHERE id=${openRows[0].id} RETURNING *` as any[];
+    return rows[0];
+  }
   const maxRows = await sql`SELECT COALESCE(max(attempt_no),0)::int attempt FROM hr_survey_sessions WHERE survey_id=${surveyId} AND user_hash=${userHash}` as any[];
   const attemptNo = Number(maxRows[0]?.attempt ?? 0) + 1;
   const id = randomUUID();
@@ -53,9 +63,10 @@ export async function findOrCreateSession(surveyId: string, userHash: string, ch
   return rows[0];
 }
 
-export async function findOpenSession(userHash: string) { await ensureSchema(); const rows = await getSql()`SELECT sess.* FROM hr_survey_sessions sess JOIN hr_surveys s ON s.id=sess.survey_id WHERE sess.user_hash=${userHash} AND sess.completed=false AND s.status='active' ORDER BY sess.updated_at DESC LIMIT 1` as any[]; return rows[0] ?? null; }
+export async function findOpenSession(userHash: string) { await ensureSchema(); const rows = await getSql()`SELECT sess.* FROM hr_survey_sessions sess JOIN hr_surveys s ON s.id=sess.survey_id WHERE sess.user_hash=${userHash} AND sess.completed=false AND sess.paused=false AND s.status='active' ORDER BY sess.updated_at DESC LIMIT 1` as any[]; return rows[0] ?? null; }
+export async function pauseOpenSession(userHash: string): Promise<boolean> { await ensureSchema(); const rows = await getSql()`UPDATE hr_survey_sessions SET paused=true, updated_at=now() WHERE id=(SELECT sess.id FROM hr_survey_sessions sess JOIN hr_surveys s ON s.id=sess.survey_id WHERE sess.user_hash=${userHash} AND sess.completed=false AND sess.paused=false AND s.status='active' ORDER BY sess.updated_at DESC LIMIT 1) RETURNING id` as any[]; return Boolean(rows[0]); }
 export async function saveAnswer(session: any, question: HrSurveyQuestion, parsed: any): Promise<void> { const sql = getSql(); await sql`INSERT INTO hr_survey_answers (session_id,survey_id,question_id,question_code,question_text,category,answer_text,answer_number,answer_json) VALUES (${session.id},${session.survey_id},${question.id},${question.code},${question.text},${question.category},${parsed.answerText},${parsed.answerNumber},${parsed.answerJson ? JSON.stringify(parsed.answerJson) : null}::jsonb) ON CONFLICT (session_id,question_id) DO UPDATE SET answer_text=EXCLUDED.answer_text, answer_number=EXCLUDED.answer_number, answer_json=EXCLUDED.answer_json, created_at=now()`; const next = question.position + 1; if (parsed.profileField === 'employeeGroup') await sql`UPDATE hr_survey_sessions SET current_question_position=${next}, employee_group=${parsed.profileValue}, updated_at=now() WHERE id=${session.id}`; else if (parsed.profileField === 'employeeRole') await sql`UPDATE hr_survey_sessions SET current_question_position=${next}, employee_role=${parsed.profileValue}, updated_at=now() WHERE id=${session.id}`; else if (parsed.profileField === 'tenure') await sql`UPDATE hr_survey_sessions SET current_question_position=${next}, tenure=${parsed.profileValue}, updated_at=now() WHERE id=${session.id}`; else if (parsed.profileField === 'storeOrDepartment') await sql`UPDATE hr_survey_sessions SET current_question_position=${next}, store_or_department=${parsed.profileValue}, updated_at=now() WHERE id=${session.id}`; else await sql`UPDATE hr_survey_sessions SET current_question_position=${next}, updated_at=now() WHERE id=${session.id}`; }
-export async function completeSession(sessionId: string): Promise<void> { await getSql()`UPDATE hr_survey_sessions SET completed=true, completed_at=now(), updated_at=now() WHERE id=${sessionId}`; }
+export async function completeSession(sessionId: string): Promise<void> { await getSql()`UPDATE hr_survey_sessions SET completed=true, paused=false, completed_at=now(), updated_at=now() WHERE id=${sessionId}`; }
 
 export async function getAnalytics(surveyId: string) {
   await ensureSchema();

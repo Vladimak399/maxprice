@@ -1,13 +1,12 @@
-import { randomUUID } from "node:crypto";
 import { sendKnowledgeMenu } from "../knowledge/bot";
 import { sendMessage } from "../max/client";
 import type { ExtractedMaxUpdate, MaxAttachment, MaxMessageButton } from "../types/max";
-import { ensureSchema, getSql, isDatabaseConfigured } from "../knowledge/db";
+import { getSql, isDatabaseConfigured } from "../knowledge/db";
 import { getSurveyHashSalt, hashSurveyUserId, parseSurveyAnswer } from "./logic";
-import { completeSession, ensureDefaultSurvey, findOpenSession, getActiveSurvey, getQuestions, isMaxAdmin, saveAnswer, setSurveyStatus } from "./repository";
+import { completeSession, ensureDefaultSurvey, findOpenSession, findOrCreateSession, getActiveSurvey, getQuestions, isMaxAdmin, pauseOpenSession, saveAnswer, setSurveyStatus } from "./repository";
 import { visibleQuestions } from "./visibility";
 
-const SURVEY_COMMANDS = new Set(["опрос", "/survey", "начать опрос", "пройти опрос", "hr-опрос", "/start_survey"]);
+const SURVEY_COMMANDS = new Set(["опрос", "/survey", "начать опрос", "пройти опрос", "продолжить опрос", "hr-опрос", "/start_survey"]);
 const SURVEY_EXIT_COMMANDS = new Set(["выйти из опроса", "остановить опрос", "прекратить опрос", "пауза", "отмена", "отменить опрос"]);
 const MENU_COMMANDS = new Set(["/start", "start", "меню", "помощь"]);
 const ADMIN_COMMANDS = new Set(["/admin", "админка"]);
@@ -29,8 +28,18 @@ export async function sendMainMenu(update: ExtractedMaxUpdate): Promise<void> {
 
 export async function handleSurveyExit(update: ExtractedMaxUpdate): Promise<boolean> {
   if (!isSurveyExitCommand(update.text)) return false;
+  const userHash = update.userId && getSurveyHashSalt() && isDatabaseConfigured() ? hashSurveyUserId(update.userId) : null;
+  const paused = userHash ? await pauseOpenSession(userHash) : false;
+  if (!paused) {
+    await sendMessage(target(update), "Активного опроса нет.", { attachments: keyboard([["Пройти опрос"], ["База знаний"]]) });
+    return true;
+  }
   await sendMessage(target(update), "Опрос поставлен на паузу. Ответы не удалены. Когда захотите продолжить, нажмите «Пройти опрос».", { attachments: keyboard([["Пройти опрос"], ["База знаний"]]) });
   return true;
+}
+
+export async function sendSurveyIsolationNotice(update: ExtractedMaxUpdate): Promise<void> {
+  await sendMessage(target(update), "Сейчас открыт опрос. Сначала ответьте на текущий вопрос или выйдите из опроса — база знаний станет доступна после выхода.", { attachments: keyboard([["Продолжить опрос"], ["Выйти из опроса"]]) });
 }
 
 export async function handleKnowledgeMenu(update: ExtractedMaxUpdate): Promise<boolean> {
@@ -48,7 +57,6 @@ export async function handleMaxAdminCommand(update: ExtractedMaxUpdate): Promise
 }
 
 export async function hasOpenSurveySession(update: ExtractedMaxUpdate): Promise<boolean> { if (!update.userId || !getSurveyHashSalt() || !isDatabaseConfigured()) return false; return Boolean(await findOpenSession(hashSurveyUserId(update.userId))); }
-async function findOrCreateSurveySession(surveyId: string, userHash: string, chatHash: string | null) { await ensureSchema(); const sql = getSql(); const openRows = await sql`SELECT * FROM hr_survey_sessions WHERE survey_id=${surveyId} AND user_hash=${userHash} AND completed=false ORDER BY updated_at DESC LIMIT 1` as any[]; if (openRows[0]) return openRows[0]; const maxRows = await sql`SELECT COALESCE(max(attempt_no),0)::int attempt FROM hr_survey_sessions WHERE survey_id=${surveyId} AND user_hash=${userHash}` as any[]; const attemptNo = Number(maxRows[0]?.attempt ?? 0) + 1; const id = randomUUID(); const rows = await sql`INSERT INTO hr_survey_sessions (id,survey_id,user_hash,chat_hash,source_chat_id,attempt_no) VALUES (${id},${surveyId},${userHash},${chatHash},null,${attemptNo}) RETURNING *` as any[]; return rows[0]; }
 async function nextVisible(session: any, startPosition: number) { const questions = await getQuestions(session.survey_id); const visible = visibleQuestions(questions, session); const question = visible.find((item) => item.position >= startPosition) ?? null; if (question && Number(session.current_question_position) !== question.position) await getSql()`UPDATE hr_survey_sessions SET current_question_position=${question.position}, updated_at=now() WHERE id=${session.id}`; return { question, total: visible.length, answered: question ? visible.filter((item) => item.position < question.position).length : visible.length }; }
 
 async function sendQuestion(update: ExtractedMaxUpdate, session: any, startPosition = Number(session.current_question_position)): Promise<void> {
@@ -60,7 +68,7 @@ async function sendQuestion(update: ExtractedMaxUpdate, session: any, startPosit
   else if (q.type === "multi_choice") text += "\n\n" + q.options.map((o, i) => `${i + 1}. ${o}`).join("\n") + `\n\nНапишите номера через запятую, пробел или точку с запятой${q.maxChoices ? `. Можно выбрать не больше ${q.maxChoices}.` : "."}`;
   else if (!q.required) { text += "\n\nМожно написать свободный ответ или «пропустить»."; rows = [["Пропустить"]]; }
   if (!q.required && q.type !== "text") rows.push(["Пропустить"]);
-  rows.push(["Выйти из опроса", "База знаний"]);
+  rows.push(["Выйти из опроса"]);
   await sendMessage(target(update), text, rows.length ? { attachments: keyboard(rows) } : {});
 }
 
@@ -72,7 +80,7 @@ export async function startOrContinueSurvey(update: ExtractedMaxUpdate): Promise
   let survey = await getActiveSurvey();
   if (!survey) { const defaultSurveyId = await ensureDefaultSurvey(); await setSurveyStatus(defaultSurveyId, "active"); survey = await getActiveSurvey(); }
   if (!survey) { await sendMessage(target(update), "Сейчас не удалось открыть HR-опрос автоматически. Попробуйте позже или обратитесь к администратору."); return; }
-  const session = await findOrCreateSurveySession(survey.id, userHash, update.chatId ? hashSurveyUserId(update.chatId) : null);
+  const session = await findOrCreateSession(survey.id, userHash, update.chatId ? hashSurveyUserId(update.chatId) : null);
   const attemptText = Number(session.attempt_no) > 1 ? `\n\nЭто повторное прохождение №${session.attempt_no}. Прошлые ответы не удаляются.` : "";
   if (Number(session.current_question_position) === 1) await sendMessage(target(update), `${survey.title}\n\n${survey.description ?? ""}\n\nЧасть вопросов будет зависеть от того, где вы работаете: магазин, офис или склад. Можно выйти и вернуться позже.${attemptText}`);
   else await sendMessage(target(update), "Продолжаем опрос с того места, где вы остановились.");

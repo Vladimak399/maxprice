@@ -5,31 +5,31 @@ import { getSurveyHashSalt, hashSurveyUserId, parseSurveyAnswer, scoreZone } fro
 import { isMenuCommand, isSurveyCommand } from "../src/hrSurvey/bot";
 import type { HrSurveyQuestion } from "../src/hrSurvey/types";
 
-const q = (index: number): HrSurveyQuestion => {
-  const question = DEFAULT_HR_QUESTIONS[index];
-  if (!question) throw new Error(`missing question ${index}`);
+const q = (code: string): HrSurveyQuestion => {
+  const question = DEFAULT_HR_QUESTIONS.find((item) => item.code === code);
+  if (!question) throw new Error(`missing question ${code}`);
   return { ...question, id: "q", surveyId: "s" };
 };
 
 describe("hr survey logic", () => {
   it("parseSurveyAnswer validates scale_1_5", () => {
-    expect(parseSurveyAnswer(q(4), "5").answerNumber).toBe(5);
-    expect(() => parseSurveyAnswer(q(4), "6")).toThrow(/1 до 5/);
+    expect(parseSurveyAnswer(q("core_clarity"), "5").answerNumber).toBe(5);
+    expect(() => parseSurveyAnswer(q("core_clarity"), "6")).toThrow(/1 до 5/);
   });
   it("parseSurveyAnswer validates single_choice", () => {
-    expect(parseSurveyAnswer(q(0), "магазин").answerText).toBe("Магазин");
-    expect(() => parseSurveyAnswer(q(0), "дом")).toThrow(/вариантов/);
+    expect(parseSurveyAnswer(q("workplace"), "магазин").answerText).toBe("Магазин");
+    expect(() => parseSurveyAnswer(q("workplace"), "дом")).toThrow(/вариантов/);
   });
   it("parseSurveyAnswer validates multi_choice formats and limits", () => {
-    expect(parseSurveyAnswer(q(27), "1, 3").answerText).toContain("Нехватка сотрудников");
-    expect(parseSurveyAnswer(q(27), "1 3").answerJson).toEqual(["Нехватка сотрудников", "График"]);
-    expect(parseSurveyAnswer(q(27), "1;3").answerJson).toEqual(["Нехватка сотрудников", "График"]);
-    expect(() => parseSurveyAnswer(q(27), "1,2,3,4")).toThrow(/не больше 3/);
+    expect(parseSurveyAnswer(q("blockers"), "1, 3").answerText).toContain("Нехватка сотрудников");
+    expect(parseSurveyAnswer(q("blockers"), "1 3").answerJson).toEqual(["Нехватка сотрудников", "График"]);
+    expect(parseSurveyAnswer(q("blockers"), "1;3").answerJson).toEqual(["Нехватка сотрудников", "График"]);
+    expect(() => parseSurveyAnswer(q("blockers"), "1,2,3,4")).toThrow(/не больше 3/);
   });
   it("parseSurveyAnswer handles text and skip", () => {
-    expect(parseSurveyAnswer(q(29), "улучшить график").answerText).toBe("улучшить график");
-    expect(parseSurveyAnswer(q(30), "пропустить").answerText).toBeNull();
-    expect(() => parseSurveyAnswer(q(29), " ")).toThrow(/ответьте/);
+    expect(parseSurveyAnswer(q("one_change"), "улучшить график").answerText).toBe("улучшить график");
+    expect(parseSurveyAnswer(q("anonymous_problem"), "пропустить").answerText).toBeNull();
+    expect(() => parseSurveyAnswer(q("one_change"), " ")).toThrow(/ответьте/);
   });
   it("hashes user id with salt", () => {
     expect(hashSurveyUserId("123", "salt")).toHaveLength(64);
@@ -60,15 +60,16 @@ describe("hr survey logic", () => {
   });
   it("recognizes survey and menu commands", () => {
     expect(isSurveyCommand("Пройти опрос")).toBe(true);
+    expect(isSurveyCommand("Продолжить опрос")).toBe(true);
     expect(isSurveyCommand("hr-опрос")).toBe(true);
     expect(isSurveyCommand("/start_survey")).toBe(true);
     expect(isMenuCommand("/start")).toBe(true);
     expect(isMenuCommand("помощь")).toBe(true);
   });
-  it("default survey has 32 unique questions", () => {
-    expect(DEFAULT_HR_QUESTIONS).toHaveLength(32);
-    expect(new Set(DEFAULT_HR_QUESTIONS.map((item) => item.position)).size).toBe(32);
-    expect(new Set(DEFAULT_HR_QUESTIONS.map((item) => item.code)).size).toBe(32);
+  it("default survey has 26 unique questions", () => {
+    expect(DEFAULT_HR_QUESTIONS).toHaveLength(26);
+    expect(new Set(DEFAULT_HR_QUESTIONS.map((item) => item.position)).size).toBe(26);
+    expect(new Set(DEFAULT_HR_QUESTIONS.map((item) => item.code)).size).toBe(26);
   });
   it("completed session restart message is stable", () => {
     expect("Вы уже прошли этот опрос. Спасибо.").toMatch(/уже прошли/);
