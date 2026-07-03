@@ -1,6 +1,6 @@
 import type { HrSurveyQuestion } from "./types";
 
-export const DEFAULT_HR_SURVEY_ID = "superceny-employee-satisfaction";
+export const DEFAULT_HR_SURVEY_ID = "superceny-employee-satisfaction-v2";
 
 export const DEFAULT_HR_SURVEY = {
   id: DEFAULT_HR_SURVEY_ID,

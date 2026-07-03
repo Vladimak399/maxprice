@@ -2,7 +2,8 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getChatConfig, resolveTarget } from "../config/chats";
 import { handleKnowledgeUpdate } from "../knowledge/bot";
 import { isProductKnowledgeIntent } from "../knowledge/productSuppliersBot";
-import { handleKnowledgeMenu, handleMaxAdminCommand, handleSurveyAnswer, handleSurveyExit, hasOpenSurveySession, isMenuCommand, isSurveyCommand, sendMainMenu, startOrContinueSurvey } from "../hrSurvey/bot";
+import { handleKnowledgeMenu, handleMaxAdminCommand, handleSurveyAnswer, handleSurveyExit, hasOpenSurveySession, isAdminCommand, isMenuCommand, isSurveyCommand, isSurveyExitCommand, sendMainMenu, sendSurveyIsolationNotice, startOrContinueSurvey } from "../hrSurvey/bot";
+import { resolvePrivateMessageRoute } from "./privateRouting";
 import { rememberMaxBotUser } from "../hrSurvey/repository";
 import { sendMessage } from "../max/client";
 import { extractMaxUpdate } from "../max/updateExtractor";
@@ -31,7 +32,11 @@ async function processUpdate(update: MaxUpdate): Promise<void> {
   const isPrivateDialog = Boolean(extracted.userId && extracted.chatId && !extracted.chatId.startsWith("-"));
   if (isPrivateDialog || extracted.updateType === "bot_started") await rememberMaxBotUser(extracted.userId, extracted.chatId);
 
-  if (extracted.updateType === "bot_started") { await sendMainMenu(extracted); return; }
+  if (extracted.updateType === "bot_started") {
+    if (isPrivateDialog && await hasOpenSurveySession(extracted)) await sendSurveyIsolationNotice(extracted);
+    else await sendMainMenu(extracted);
+    return;
+  }
   if (!isMessageCreated(extracted.updateType) || !extracted.text.trim()) return;
   const config = getChatConfig(extracted.chatId);
   if (config) {
@@ -41,14 +46,24 @@ async function processUpdate(update: MaxUpdate): Promise<void> {
     return;
   }
   if (isPrivateDialog) {
-    if (isMenuCommand(extracted.text)) { await sendMainMenu(extracted); return; }
-    if (await handleMaxAdminCommand(extracted)) return;
-    if (isSurveyCommand(extracted.text)) { await startOrContinueSurvey(extracted); return; }
-    if (await handleSurveyExit(extracted)) return;
-    if (await handleKnowledgeMenu(extracted)) return;
-    if (isProductKnowledgeIntent(extracted.text)) { await handleKnowledgeUpdate(extracted); return; }
-    if (await hasOpenSurveySession(extracted)) { await handleSurveyAnswer(extracted); return; }
-    await handleKnowledgeUpdate(extracted);
+    const text = extracted.text;
+    const route = resolvePrivateMessageRoute({
+      hasActiveSurvey: await hasOpenSurveySession(extracted),
+      isAdminCommand: isAdminCommand(text),
+      isSurveyExitCommand: isSurveyExitCommand(text),
+      isSurveyCommand: isSurveyCommand(text),
+      isMenuCommand: isMenuCommand(text),
+      isKnowledgeMenuCommand: text.trim().toLowerCase() === "база знаний",
+      isProductKnowledgeIntent: isProductKnowledgeIntent(text)
+    });
+    if (route === "admin") await handleMaxAdminCommand(extracted);
+    else if (route === "survey_exit") await handleSurveyExit(extracted);
+    else if (route === "survey_continue") await startOrContinueSurvey(extracted);
+    else if (route === "survey_blocked") await sendSurveyIsolationNotice(extracted);
+    else if (route === "survey_answer") await handleSurveyAnswer(extracted);
+    else if (route === "menu") await sendMainMenu(extracted);
+    else if (route === "knowledge_menu") await handleKnowledgeMenu(extracted);
+    else await handleKnowledgeUpdate(extracted);
     return;
   }
   console.warn("Unknown chat", { chatId: extracted.chatId, updateType: extracted.updateType });
