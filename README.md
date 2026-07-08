@@ -74,6 +74,64 @@ https://maxprice.example.ru/api/max/webhook
 
 `CHAT_CONFIGS_JSON` - удобный способ подключать несколько MAX-чатов без правки кода.
 
+
+## Быстрое восстановление после сброса Vercel secrets
+
+Если Vercel-проект был пересоздан или переменные окружения сбросились, старые секреты из кода восстановить нельзя — их нужно задать заново в **Vercel Project Settings -> Environment Variables**. Для сценария из рабочих MAX-чатов обязательны только переменные ниже:
+
+1. `MAX_BOT_TOKEN` — токен существующего MAX-бота из кабинета/настроек бота MAX.
+2. `MAX_WEBHOOK_SECRET` — новый случайный секрет, например 32+ символа. Его не нужно помнить заранее: после установки переменной endpoint регистрации сам передаст его в MAX.
+3. `ADMIN_SECRET` — новый пароль для служебных endpoint. Используется только в заголовке `Authorization: Bearer ...`.
+4. `PUBLIC_WEBHOOK_URL` — полный URL текущего деплоя: `https://<домен>/api/max/webhook`.
+5. `TARGET_CHAT_ID` или `TARGET_USER_ID` — куда бот отправляет отчет `⚠️ Рост закупочной цены`. Для отдельного чата отчетов обычно нужен `TARGET_CHAT_ID`.
+6. `CHAT_CONFIGS_JSON` — список рабочих чатов, где операторы пишут исходные сообщения. Для чата операторов должен быть `mode: "price_changes"`, `enabled: true`.
+
+Минимальный пример для одного рабочего чата операторов и отдельного чата отчетов:
+
+```json
+{
+  "CHAT_ID_ЧАТА_ОПЕРАТОРОВ": {
+    "name": "Операторы цены",
+    "mode": "price_changes",
+    "enabled": true,
+    "sendTo": "chat"
+  }
+}
+```
+
+При такой настройке итоговые сообщения уйдут в общий `TARGET_CHAT_ID`. Если для конкретного входящего чата нужен отдельный чат отчетов, добавь внутрь его конфига `"targetChatId": "CHAT_ID_ЧАТА_ОТЧЕТОВ"`.
+
+Порядок запуска после восстановления переменных:
+
+```bash
+curl -H "Authorization: Bearer YOUR_ADMIN_SECRET" \
+  "https://YOUR_DOMAIN/api/max/health"
+```
+
+В ответе проверь, что `MAX_BOT_TOKEN`, `MAX_WEBHOOK_SECRET`, `ADMIN_SECRET`, `PUBLIC_WEBHOOK_URL`, `TARGET_CHAT_ID`/`TARGET_USER_ID` и `CHAT_CONFIGS_JSON` существуют, а `configErrors` пустой.
+
+Затем заново зарегистрируй webhook в MAX:
+
+```bash
+curl -X POST "https://YOUR_DOMAIN/api/max/register-webhook" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+После этого отправь в рабочий чат операторов тестовое сообщение в обычном формате. Бот должен разобрать строки `Цена товара: ... (цена в накладной) ... текущей закупочной цены - ...` и отправить в целевой чат только позиции с ростом закупочной цены или текущей ценой `0`.
+
+Если неизвестен `chat_id` рабочего чата операторов:
+
+1. Сначала настрой `MAX_BOT_TOKEN`, `MAX_WEBHOOK_SECRET`, `ADMIN_SECRET`, `PUBLIC_WEBHOOK_URL` и `TARGET_CHAT_ID`/`TARGET_USER_ID`.
+2. Поставь `ADMIN_NOTIFY_UNKNOWN_CHATS=true`.
+3. Зарегистрируй webhook.
+4. Напиши любое сообщение в рабочий чат операторов.
+5. Бот пришлет в целевой чат неизвестный `chat_id`; добавь его в `CHAT_CONFIGS_JSON`.
+6. Верни `ADMIN_NOTIFY_UNKNOWN_CHATS=false`, чтобы не получать лишние уведомления.
+
+`DATABASE_URL` не обязателен для мониторинга закупочных цен. Без него не будут работать админка базы знаний и HR-опросы, но сценарий `MAX chat -> parser -> отчет в MAX` продолжит работать.
+
 ## Конфиг чатов
 
 На старте можно держать конфиг в `src/config/chats.ts`, но удобнее через переменную `CHAT_CONFIGS_JSON` в Vercel.
