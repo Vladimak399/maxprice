@@ -8,9 +8,19 @@ import { RUSSIAN_TRUSTED_ROOT_CA } from "./russianTrustedRoot";
 const MAX_API_BASE_URL = "https://platform-api2.max.ru";
 const maxHttpsAgent = new Agent({ ca: [...rootCertificates, RUSSIAN_TRUSTED_ROOT_CA] });
 
+export class MaxApiError extends Error {
+  constructor(public readonly status: number, public readonly body: string) {
+    super(`MAX API error ${status}: ${body}`);
+  }
+}
+
+export function getMaxAuthHeader(token = requireEnv("MAX_BOT_TOKEN")): string {
+  return process.env.MAX_AUTH_SCHEME?.trim().toLowerCase() === "bearer" ? `Bearer ${token}` : token;
+}
+
 function getHeaders(): Record<string, string> {
   return {
-    Authorization: requireEnv("MAX_BOT_TOKEN"),
+    Authorization: getMaxAuthHeader(),
     "Content-Type": "application/json"
   };
 }
@@ -30,7 +40,7 @@ async function requestMax(path: string, options: RequestInit): Promise<unknown> 
         const text = Buffer.concat(chunks).toString("utf8");
         const status = response.statusCode ?? 500;
         if (status < 200 || status >= 300) {
-          reject(new Error(`MAX API error ${status}: ${text}`));
+          reject(new MaxApiError(status, text));
           return;
         }
         try {
