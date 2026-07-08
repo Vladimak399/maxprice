@@ -3,6 +3,7 @@ import { parseMoney, roundMoney, roundPercent } from "./money";
 import { detectShopInLine } from "./shops";
 
 const PRICE_LINE_RE = /^(?:(?:Цена\s+)?товара:\s*)?(?<name>.+),\s*\((?<newPrice>[\d\s]+(?:[,.]\d+)?)\)\s*,?\s*отличается\s*(?:от|то)?\s*текущ[а-яё\s]+закупочн[а-яё\s]+цены\s*-\s*(?<oldPrice>[\d\s]+(?:[,.]\d+)?)/iu;
+const MIN_GROWTH_DIFF = 1;
 
 function normalizeProductName(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -51,8 +52,8 @@ export function parsePriceMessage(text: string): ParseResult {
       continue;
     }
 
-    if (itemBase.newPrice > itemBase.oldPrice) {
-      const diff = roundMoney(itemBase.newPrice - itemBase.oldPrice);
+    const diff = roundMoney(itemBase.newPrice - itemBase.oldPrice);
+    if (diff >= MIN_GROWTH_DIFF) {
       const percent = roundPercent((diff / itemBase.oldPrice) * 100);
       growthItems.push({ ...itemBase, diff, percent });
     }
