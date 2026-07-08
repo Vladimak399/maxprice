@@ -28,6 +28,7 @@ export function extractMaxUpdate(update: MaxUpdate): ExtractedMaxUpdate {
 
   const text =
     getStringAtPath(update, ["message", "body", "text"]) ??
+    getStringAtPath(update, ["message", "message", "text"]) ??
     getStringAtPath(update, ["message", "text"]) ??
     getStringAtPath(update, ["body", "text"]) ??
     getStringAtPath(update, ["text"]) ??
@@ -47,6 +48,8 @@ export function extractMaxUpdate(update: MaxUpdate): ExtractedMaxUpdate {
 
   const messageId =
     getStringAtPath(update, ["message", "message_id"]) ??
+    getStringAtPath(update, ["message", "body", "mid"]) ??
+    getStringAtPath(update, ["message", "message", "mid"]) ??
     getStringAtPath(update, ["message", "id"]) ??
     getStringAtPath(update, ["message_id"]);
 
