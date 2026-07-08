@@ -364,6 +364,8 @@ curl.exe -X POST "https://maxprice.vercel.app/api/max/register-webhook" ^
 
 ### 3. Проверка отправки сообщения в MAX
 
+Endpoint отправляет обычное сообщение MAX без устаревшего поля `notify`, чтобы API не отклонял запрос из-за неподдерживаемого параметра. Если сообщение отправилось, но push-уведомление на телефоне всё равно не появилось, проверьте настройки уведомлений самого чата и устройства в MAX.
+
 ```bat
 curl.exe -X POST "https://maxprice.vercel.app/api/max/test-send" ^
   -H "Authorization: Bearer ADMIN_SECRET" ^
