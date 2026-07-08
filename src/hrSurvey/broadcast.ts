@@ -23,7 +23,7 @@ export async function sendSurveyInvite(surveyId: string, title: string): Promise
 
   for (const user of users) {
     try {
-      await sendMessageToUser(user.userId, text, { attachments: inviteKeyboard, notify: true });
+      await sendMessageToUser(user.userId, text, { attachments: inviteKeyboard });
       sent += 1;
       await sql`INSERT INTO hr_survey_invites (campaign_id,survey_id,user_id,status,error) VALUES (${campaignId},${surveyId},${user.userId},'sent',null) ON CONFLICT (campaign_id,user_id) DO UPDATE SET status='sent', error=null, sent_at=now()`;
     } catch (error) {

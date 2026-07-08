@@ -58,14 +58,21 @@ async function requestMax(path: string, options: RequestInit): Promise<unknown> 
   });
 }
 
-type SendMessageOptions = { attachments?: MaxAttachment[]; notify?: boolean };
+type SendMessageOptions = { attachments?: MaxAttachment[] };
+
+export function buildSendMessageBody(text: string, options: SendMessageOptions = {}): { text: string; attachments?: MaxAttachment[] } {
+  return {
+    text,
+    ...(options.attachments ? { attachments: options.attachments } : {})
+  };
+}
 
 export async function sendMessageToUser(userId: string, text: string, options: SendMessageOptions = {}): Promise<void> {
   const chunks = chunkText(text, 3900);
   for (const [index, chunk] of chunks.entries()) {
     await requestMax(`/messages?user_id=${encodeURIComponent(userId)}`, {
       method: "POST",
-      body: JSON.stringify({ text: chunk, notify: options.notify ?? true, attachments: index === chunks.length - 1 ? options.attachments : undefined })
+      body: JSON.stringify(buildSendMessageBody(chunk, { attachments: index === chunks.length - 1 ? options.attachments : undefined }))
     });
   }
 }
@@ -75,7 +82,7 @@ export async function sendMessageToChat(chatId: string, text: string, options: S
   for (const [index, chunk] of chunks.entries()) {
     await requestMax(`/messages?chat_id=${encodeURIComponent(chatId)}`, {
       method: "POST",
-      body: JSON.stringify({ text: chunk, notify: options.notify ?? true, attachments: index === chunks.length - 1 ? options.attachments : undefined })
+      body: JSON.stringify(buildSendMessageBody(chunk, { attachments: index === chunks.length - 1 ? options.attachments : undefined }))
     });
   }
 }
