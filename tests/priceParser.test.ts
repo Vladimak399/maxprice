@@ -35,6 +35,17 @@ describe("parsePriceMessage", () => {
     expect(result.zeroPriceItems[0]?.name).toContain("Макфа Бабочки");
   });
 
+  it("игнорирует рост цены меньше 1 рубля", () => {
+    const result = parsePriceMessage("Цена товара: Товар с погрешностью, (100,99), отличается от текущей закупочной цены - 100");
+    expect(result.growthItems).toHaveLength(0);
+  });
+
+  it("добавляет рост цены ровно от 1 рубля", () => {
+    const result = parsePriceMessage("Цена товара: Товар с ростом, (101), отличается от текущей закупочной цены - 100");
+    expect(result.growthItems).toHaveLength(1);
+    expect(result.growthItems[0]?.diff).toBe(1);
+  });
+
   it("корректно привязывает товары к двум магазинам внутри одного сообщения", () => {
     const result = parsePriceMessage(sampleMessage);
     const tea = result.growthItems.find((entry) => entry.name.includes("Чай Пример"));
