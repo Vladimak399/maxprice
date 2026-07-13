@@ -46,6 +46,18 @@ describe("parsePriceMessage", () => {
     expect(result.growthItems[0]?.diff).toBe(1);
   });
 
+  it("игнорирует рост цены ровно на 22 процента как вероятное добавление НДС", () => {
+    const result = parsePriceMessage("Цена товара: Товар с НДС, (122), отличается от текущей закупочной цены - 100");
+    expect(result.growthItems).toHaveLength(0);
+    expect(result.zeroPriceItems).toHaveLength(0);
+  });
+
+  it("не игнорирует рост цены, если процент отличается от 22", () => {
+    const result = parsePriceMessage("Цена товара: Товар без НДС-фильтра, (122,10), отличается от текущей закупочной цены - 100");
+    expect(result.growthItems).toHaveLength(1);
+    expect(result.growthItems[0]?.percent).toBe(22.1);
+  });
+
   it("корректно привязывает товары к двум магазинам внутри одного сообщения", () => {
     const result = parsePriceMessage(sampleMessage);
     const tea = result.growthItems.find((entry) => entry.name.includes("Чай Пример"));
