@@ -18,6 +18,8 @@ export function formatUnorderedGoodsAlert(result: UnorderedGoodsAnalysis): strin
     if (row.productCode) lines.push(`Код/штрихкод: ${row.productCode}`);
     lines.push(`Поступило: ${quantity(row.receivedQuantity)}`);
     if (row.orderedQuantity !== null) lines.push(`В заказе: ${quantity(row.orderedQuantity)}`);
+    if (row.receivedQuantity !== null && row.orderedQuantity !== null && row.receivedQuantity > row.orderedQuantity) lines.push(`Сверх заказа: +${quantity(row.receivedQuantity - row.orderedQuantity)}`);
+    else if (row.receivedQuantity !== null && (row.orderedQuantity === null || row.orderedQuantity === 0)) lines.push(`Без заказа: ${quantity(row.receivedQuantity)}`);
   });
   lines.push("", `OCR: ${Math.round(result.ocrConfidence)}%`, "Оригинальный скриншот находится в рабочем чате.");
   return lines.join("\n");

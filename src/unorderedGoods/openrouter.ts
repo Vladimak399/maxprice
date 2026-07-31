@@ -45,7 +45,9 @@ export function mapVisionResponse(value: VisionResponse): UnorderedGoodsAnalysis
     return row.ordered_quantity === null && (row.violation_type === "unordered" || row.violation_type === "excess");
   });
   const markedRows: MarkedTableRow[] = rows.map((row, index) => ({ visibleIndex: index + 1, sourceRowNumber: row.row_number ?? null, productCode: row.product_code ?? null, productName: row.product_name?.trim() || "Товар не распознан", receivedQuantity: row.received_quantity ?? null, orderedQuantity: row.ordered_quantity ?? null, markerRatio: 1, ocrText: JSON.stringify(row) }));
-  return { counterparty: value.counterparty ?? null, warehouse: value.warehouse ?? null, documentNumber: value.document_number ?? null, documentDate: value.document_date ?? null, ocrConfidence: Math.max(0, Math.min(100, value.confidence ?? 85)), visibleRows: markedRows.length, markedRows, rawText: JSON.stringify(value) };
+  const rawConfidence = value.confidence ?? 0.85;
+  const confidencePercent = rawConfidence <= 1 ? rawConfidence * 100 : rawConfidence;
+  return { counterparty: value.counterparty ?? null, warehouse: value.warehouse ?? null, documentNumber: value.document_number ?? null, documentDate: value.document_date ?? null, ocrConfidence: Math.max(0, Math.min(100, confidencePercent)), visibleRows: markedRows.length, markedRows, rawText: JSON.stringify(value) };
 }
 
 async function prepareVisionImage(image: Buffer): Promise<Buffer> {
