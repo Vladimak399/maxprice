@@ -89,6 +89,36 @@ async function createSchema(): Promise<void> {
 
   await sql`CREATE TABLE IF NOT EXISTS max_admin_users (id bigserial PRIMARY KEY, user_id text NOT NULL UNIQUE, name text, active boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now())`;
 
+  await sql`CREATE TABLE IF NOT EXISTS unordered_goods_events (
+    id text PRIMARY KEY,
+    message_id text,
+    source_chat_id text,
+    source_user_id text,
+    image_url text NOT NULL,
+    counterparty text,
+    warehouse text,
+    document_number text,
+    document_date_text text,
+    ocr_confidence numeric,
+    raw_ocr_text text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS unordered_goods_events_message_image_idx ON unordered_goods_events(message_id, image_url)`;
+  await sql`CREATE INDEX IF NOT EXISTS unordered_goods_events_counterparty_idx ON unordered_goods_events(counterparty, created_at DESC)`;
+  await sql`CREATE TABLE IF NOT EXISTS unordered_goods_items (
+    id text PRIMARY KEY,
+    event_id text NOT NULL REFERENCES unordered_goods_events(id) ON DELETE CASCADE,
+    source_row_number integer,
+    product_code text,
+    product_name text NOT NULL,
+    received_quantity numeric,
+    ordered_quantity numeric,
+    marker_ratio numeric NOT NULL,
+    ocr_text text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS unordered_goods_items_product_idx ON unordered_goods_items(product_code, product_name)`;
+
   const categories = [["returns", "returns", "Возвраты", 10], ["cash", "cash", "Касса", 20], ["receiving", "receiving", "Приёмка товара", 30], ["writeoffs", "writeoffs", "Списания", 40], ["inventory", "inventory", "Инвентаризация", 50], ["pricing", "pricing", "Цены и ценники", 60], ["personnel", "personnel", "Персонал", 70], ["emergency", "emergency", "Нештатные ситуации", 80]] as const;
   for (const [id, slug, title, position] of categories) await sql`INSERT INTO kb_categories (id, slug, title, position) VALUES (${id}, ${slug}, ${title}, ${position}) ON CONFLICT (id) DO NOTHING`;
 }

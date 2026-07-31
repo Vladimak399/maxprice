@@ -12,4 +12,11 @@ describe("MAX webhook command routing", () => {
     expect(result.reason).toContain("command before price parsing");
     expect(result.chatConfig?.mode).toBe("price_changes");
   });
+
+  it("routes screenshot-only messages to unordered_goods", () => {
+    process.env.CHAT_CONFIGS_JSON = JSON.stringify({ source: { name: "Товар без заказа", mode: "unordered_goods", enabled: true, sendTo: "chat", targetChatId: "destination" } });
+    const result = analyzeWebhookUpdate({ update_type: "message_created", message: { recipient: { chat_id: "source" }, sender: { user_id: "user" }, body: { mid: "photo.1", attachments: [{ type: "image", payload: { url: "https://cdn.max.ru/photo.webp" } }] } } });
+    expect(result.reason).toContain("analyze image attachments");
+    expect(result.chatConfig?.mode).toBe("unordered_goods");
+  });
 });

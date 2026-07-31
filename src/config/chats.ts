@@ -1,6 +1,6 @@
 import { getEnv } from "../utils/env";
 
-export type ChatMode = "price_changes" | "knowledge_base" | "returns" | "warehouse" | "repricing" | "generic";
+export type ChatMode = "price_changes" | "unordered_goods" | "knowledge_base" | "returns" | "warehouse" | "repricing" | "generic";
 
 export type ChatConfig = {
   chatId: string;
