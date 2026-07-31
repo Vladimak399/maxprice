@@ -20,6 +20,10 @@ import { formatUnorderedGoodsStats, parseUnorderedGoodsStatsCommand } from "../u
 const BASIC_COMMANDS = new Set(["/start", "start", "меню", "/menu", "help", "помощь", "debug"]);
 const DB_UNAVAILABLE_MESSAGE = "Бот работает. База данных не настроена, поэтому HR-опросы и база знаний недоступны. Мониторинг цен работает через настроенные чаты.";
 
+export function isScreenshotOcrEnabled(): boolean {
+  return process.env.SCREENSHOT_OCR_ENABLED?.trim().toLowerCase() !== "false";
+}
+
 function getRequestBody(req: VercelRequest): unknown { if (typeof req.body === "string") { try { return JSON.parse(req.body) as unknown; } catch { return {}; } } return req.body ?? {}; }
 function unwrapUpdates(body: unknown): MaxUpdate[] { if (Array.isArray(body)) return body as MaxUpdate[]; if (body !== null && typeof body === "object") { const record = body as Record<string, unknown>; if (Array.isArray(record.updates)) return record.updates as MaxUpdate[]; return [record as MaxUpdate]; } return []; }
 export function isMessageCreated(updateType: string | null): boolean { return Boolean(updateType && (updateType === "message_created" || updateType.endsWith("message_created"))); }
@@ -114,8 +118,10 @@ export function analyzeWebhookUpdate(update: MaxUpdate) {
   else if (extracted.updateType === "bot_started") reason = "Webhook would remember user if database is configured, then send menu/fallback command response.";
   else if (statsCommandDetected && targetSourceConfig) reason = "Webhook would handle supply statistics in the notification chat.";
   else if (isBasicMaxCommand(extracted.text) || isMenuCommand(extracted.text)) reason = "Webhook would handle this as a command before price parsing.";
+  else if (config?.enabled && config.mode === "price_changes" && extractMaxImages(update).length > 0 && !isScreenshotOcrEnabled()) reason = "Webhook would ignore image attachments because screenshot OCR is disabled.";
   else if (config?.enabled && config.mode === "price_changes" && extractMaxImages(update).length > 0) reason = "Webhook would analyze image attachments from the price-monitoring chat for marked unordered-goods rows.";
   else if (config?.enabled && config.mode === "price_changes") reason = reportChunksCount > 0 && (target.userId || target.chatId) ? "Webhook would parse price changes and send report chunks to resolved target." : "Webhook would parse prices but not send: no chunks or no target.";
+  else if (config?.enabled && config.mode === "unordered_goods" && !isScreenshotOcrEnabled()) reason = "Webhook would ignore this update because screenshot OCR is disabled.";
   else if (config?.enabled && config.mode === "unordered_goods") reason = extracted.text || extractMaxImages(update).length ? "Webhook would analyze image attachments for marked unordered-goods rows." : "Webhook would wait for an image attachment.";
   else if (config && !config.enabled) reason = "Chat config is disabled.";
   else if (!config) reason = "No chat config found; webhook would treat this as an unknown chat unless it is a private dialog.";
@@ -151,11 +157,17 @@ async function processUpdate(update: MaxUpdate): Promise<void> {
   if (config) {
     if (!config.enabled) return;
     if (config.mode === "price_changes" && extracted.chatId) {
-      if (hasImages) { console.log("MAX webhook route selected", { route: "unordered_goods_from_price_chat", images: extractMaxImages(update).length }); await processUnorderedGoodsUpdate(update, config); }
+      if (hasImages && isScreenshotOcrEnabled()) { console.log("MAX webhook route selected", { route: "unordered_goods_from_price_chat", images: extractMaxImages(update).length }); await processUnorderedGoodsUpdate(update, config); }
+      else if (hasImages) console.log("MAX screenshot OCR skipped", { chatId: extracted.chatId, reason: "disabled" });
       if (extracted.text.trim()) { console.log("MAX webhook route selected", { route: "price_changes" }); await processPriceUpdate(update, extracted.chatId); }
       return;
     }
-    if (config.mode === "unordered_goods") { console.log("MAX webhook route selected", { route: "unordered_goods", images: extractMaxImages(update).length }); await processUnorderedGoodsUpdate(update, config); return; }
+    if (config.mode === "unordered_goods") {
+      if (!isScreenshotOcrEnabled()) { console.log("MAX screenshot OCR skipped", { chatId: extracted.chatId, reason: "disabled" }); return; }
+      console.log("MAX webhook route selected", { route: "unordered_goods", images: extractMaxImages(update).length });
+      await processUnorderedGoodsUpdate(update, config);
+      return;
+    }
     if (!isDatabaseConfigured()) { console.warn("Database is not configured; skipping knowledge/HR chat route", { chatId: extracted.chatId, mode: config.mode }); return; }
     console.log("MAX webhook route selected", { route: "knowledge" });
     try { await handleKnowledgeUpdate(extracted); } catch (error) { console.warn("Knowledge update failed", error); }

@@ -27,6 +27,24 @@ describe("MAX webhook command routing", () => {
     expect(result.chatConfig?.mode).toBe("price_changes");
   });
 
+  it("ignores screenshots when OCR is disabled but keeps price chat enabled", () => {
+    process.env.SCREENSHOT_OCR_ENABLED = "false";
+    process.env.CHAT_CONFIGS_JSON = JSON.stringify({ source: { name: "Операторы цены", mode: "price_changes", enabled: true, sendTo: "chat", targetChatId: "destination" } });
+    const result = analyzeWebhookUpdate({ update_type: "message_created", message: { recipient: { chat_id: "source" }, sender: { user_id: "user" }, body: { mid: "photo.disabled", attachments: [{ type: "image", payload: { url: "https://cdn.max.ru/photo.webp" } }] } } });
+
+    expect(result.reason).toContain("OCR is disabled");
+    expect(result.chatConfig?.mode).toBe("price_changes");
+  });
+
+  it("continues parsing text price changes when OCR is disabled", () => {
+    process.env.SCREENSHOT_OCR_ENABLED = "false";
+    process.env.CHAT_CONFIGS_JSON = JSON.stringify({ source: { name: "Операторы цены", mode: "price_changes", enabled: true, sendTo: "chat", targetChatId: "destination" } });
+    const result = analyzeWebhookUpdate({ update_type: "message_created", message: { recipient: { chat_id: "source" }, sender: { user_id: "user" }, body: { text: "обычное текстовое сообщение о цене" } } });
+
+    expect(result.reason).toContain("parse prices");
+    expect(result.reason).not.toContain("OCR is disabled");
+  });
+
   it("routes supply statistics commands from the notification chat", () => {
     process.env.CHAT_CONFIGS_JSON = JSON.stringify({ source: { name: "Операторы цены", mode: "price_changes", enabled: true, sendTo: "chat", targetChatId: "destination" } });
     const result = analyzeWebhookUpdate({ update_type: "message_created", message: { recipient: { chat_id: "destination" }, sender: { user_id: "manager" }, body: { text: "поставщики 90" } } });
