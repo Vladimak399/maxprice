@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { ensureSchema, getSql } from "../knowledge/db";
 import type { UnorderedGoodsAnalysis } from "./types";
 import type { UnorderedGoodsChatStats } from "./statsCommands";
+import type { SupplierViolationHistory } from "./formatter";
 
 export async function saveUnorderedGoodsEvent(input: { messageId: string | null; sourceChatId: string | null; sourceUserId: string | null; imageUrl: string; result: UnorderedGoodsAnalysis }): Promise<boolean> {
   await ensureSchema();
@@ -90,5 +91,24 @@ export async function getUnorderedGoodsChatStats(periodDays: number): Promise<Un
       occurrences: Number(row.occurrences ?? 0),
       excessQuantity: Number(row.excess_quantity ?? 0)
     }))
+  };
+}
+
+export async function getSupplierViolationHistory(counterparty: string, periodDays = 30): Promise<SupplierViolationHistory> {
+  await ensureSchema();
+  const sql = getSql();
+  const days = Math.min(365, Math.max(1, Math.trunc(periodDays)));
+  const rows = await sql`SELECT count(DISTINCT e.id)::int AS events,
+      count(i.id)::int AS items,
+      COALESCE(sum(GREATEST(COALESCE(i.received_quantity, 0) - COALESCE(i.ordered_quantity, 0), 0)), 0)::float AS excess_quantity
+    FROM unordered_goods_events e
+    LEFT JOIN unordered_goods_items i ON i.event_id=e.id
+    WHERE e.counterparty=${counterparty} AND e.created_at >= now() - (${days} * interval '1 day')` as Array<Record<string, unknown>>;
+  const row = rows[0] ?? {};
+  return {
+    periodDays: days,
+    events: Number(row.events ?? 0),
+    items: Number(row.items ?? 0),
+    excessQuantity: Number(row.excess_quantity ?? 0)
   };
 }

@@ -5,9 +5,9 @@ import { downloadMaxImage, extractMaxImages } from "../max/imageAttachments";
 import { sendMessage } from "../max/client";
 import { extractMaxUpdate } from "../max/updateExtractor";
 import type { MaxUpdate } from "../types/max";
-import { formatUnorderedGoodsAlert } from "./formatter";
+import { formatUnorderedGoodsAlert, type SupplierViolationHistory } from "./formatter";
 import { analyzeScreenshot } from "./analyzer";
-import { saveUnorderedGoodsEvent } from "./repository";
+import { getSupplierViolationHistory, saveUnorderedGoodsEvent } from "./repository";
 
 export async function processUnorderedGoodsUpdate(update: MaxUpdate, config: ChatConfig): Promise<void> {
   const extracted = extractMaxUpdate(update);
@@ -23,16 +23,33 @@ export async function processUnorderedGoodsUpdate(update: MaxUpdate, config: Cha
       stage = "recognition";
       const result = await analyzeScreenshot(buffer);
       if (!result.markedRows.length) continue;
-      stage = "database";
       let isNew = true;
+      let history: SupplierViolationHistory | null = null;
       const parsedImageUrl = new URL(image.url);
       const imageReference = image.attachmentId ?? `${parsedImageUrl.origin}${parsedImageUrl.pathname}`;
-      if (isDatabaseConfigured()) isNew = await saveUnorderedGoodsEvent({ messageId: extracted.messageId, sourceChatId: extracted.chatId, sourceUserId: extracted.userId, imageUrl: imageReference, result });
-      if (isNew) await sendMessage(target, formatUnorderedGoodsAlert(result));
+      if (isDatabaseConfigured()) {
+        stage = "database";
+        try {
+          isNew = await saveUnorderedGoodsEvent({ messageId: extracted.messageId, sourceChatId: extracted.chatId, sourceUserId: extracted.userId, imageUrl: imageReference, result });
+          if (isNew && result.counterparty) history = await getSupplierViolationHistory(result.counterparty);
+        } catch (error) {
+          console.warn("Failed to save unordered-goods statistics; sending alert without history", error);
+        }
+      }
+      if (isNew) {
+        stage = "notification";
+        const text = formatUnorderedGoodsAlert(result, history);
+        try {
+          await sendMessage(target, text, { attachments: [{ type: "image", payload: { url: image.url } }] });
+        } catch (error) {
+          console.warn("Failed to attach original screenshot; sending text-only alert", error);
+          await sendMessage(target, `${text}\n\n⚠️ Исходный скриншот не удалось прикрепить.`);
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("Unordered goods screenshot processing failed", { messageId: extracted.messageId, stage, message, stack: error instanceof Error ? error.stack : undefined });
-      const reason = stage === "download" ? "не удалось скачать изображение из MAX" : stage === "recognition" ? message.includes("размеченная колонка") ? "не найдена красная разметка таблицы" : "не запустился OCR" : "не удалось сохранить статистику";
+      const reason = stage === "download" ? "не удалось скачать изображение из MAX" : stage === "recognition" ? message.includes("размеченная колонка") ? "не найдена красная разметка таблицы" : "не запустился OCR" : stage === "notification" ? "не удалось отправить уведомление" : "не удалось сохранить статистику";
       await sendMessage(target, `⚠️ Получен скриншот поступления, но обработка не завершена. Причина: ${reason}. Код этапа: ${stage}. Проверьте оригинал в рабочем чате.`);
     }
   }

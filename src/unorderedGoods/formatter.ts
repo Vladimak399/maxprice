@@ -1,26 +1,62 @@
-import type { UnorderedGoodsAnalysis } from "./types";
+import type { MarkedTableRow, UnorderedGoodsAnalysis } from "./types";
 
-function quantity(value: number | null): string { return value === null ? "не распознано" : String(value).replace(".", ","); }
+export type SupplierViolationHistory = {
+  periodDays: number;
+  events: number;
+  items: number;
+  excessQuantity: number;
+};
 
-export function formatUnorderedGoodsAlert(result: UnorderedGoodsAnalysis): string {
+function quantity(value: number | null): string {
+  return value === null ? "?" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(value);
+}
+
+function isUnordered(row: MarkedTableRow): boolean {
+  return row.receivedQuantity !== null && (row.orderedQuantity === null || row.orderedQuantity === 0);
+}
+
+function excess(row: MarkedTableRow): number {
+  if (row.receivedQuantity === null) return 0;
+  return Math.max(0, row.receivedQuantity - (row.orderedQuantity ?? 0));
+}
+
+function title(result: UnorderedGoodsAnalysis, history?: SupplierViolationHistory | null): string {
+  const unordered = result.markedRows.filter(isUnordered).length;
+  const exceeded = result.markedRows.length - unordered;
+  const totalExcess = result.markedRows.reduce((sum, row) => sum + excess(row), 0);
+  const severity = (history?.events ?? 0) >= 3 ? "🚨" : totalExcess >= 50 || result.markedRows.length >= 5 ? "🔴" : "⚠️";
+  if (unordered && !exceeded) return `${severity} ТОВАР БЕЗ ЗАКАЗА`;
+  if (exceeded && !unordered) return `${severity} ПРЕВЫШЕНИЕ ЗАКАЗА`;
+  return `${severity} НАРУШЕНИЕ ПОСТАВКИ`;
+}
+
+export function formatUnorderedGoodsAlert(result: UnorderedGoodsAnalysis, history?: SupplierViolationHistory | null): string {
   const lines = [
-    "⚠️ ТОВАР БЕЗ ЗАКАЗА / СВЕРХ ЗАКАЗА",
+    title(result, history),
     "",
-    `Контрагент: ${result.counterparty ?? "не распознан"}`,
-    `Склад: ${result.warehouse ?? "не распознан"}`,
-    `Документ: ${result.documentNumber ?? "не распознан"}`,
-    `Дата: ${result.documentDate ?? "не распознана"}`,
-    "",
-    `Выделено проблемных строк: ${result.markedRows.length}`
+    result.counterparty ?? "Контрагент не распознан"
   ];
+  const context = [result.warehouse, result.documentNumber ? `док. ${result.documentNumber}` : null].filter(Boolean).join(" · ");
+  if (context) lines.push(context);
+
   result.markedRows.forEach((row, index) => {
+    const type = isUnordered(row) ? "БЕЗ ЗАКАЗА" : "СВЕРХ ЗАКАЗА";
+    const amount = excess(row);
     lines.push("", `${index + 1}. ${row.productName}`);
-    if (row.productCode) lines.push(`Код/штрихкод: ${row.productCode}`);
-    lines.push(`Поступило: ${quantity(row.receivedQuantity)}`);
-    if (row.orderedQuantity !== null) lines.push(`В заказе: ${quantity(row.orderedQuantity)}`);
-    if (row.receivedQuantity !== null && row.orderedQuantity !== null && row.receivedQuantity > row.orderedQuantity) lines.push(`Сверх заказа: +${quantity(row.receivedQuantity - row.orderedQuantity)}`);
-    else if (row.receivedQuantity !== null && (row.orderedQuantity === null || row.orderedQuantity === 0)) lines.push(`Без заказа: ${quantity(row.receivedQuantity)}`);
+    lines.push(`${type}: заказ ${quantity(row.orderedQuantity)} · поступило ${quantity(row.receivedQuantity)} · лишнее +${quantity(amount)}`);
+    if (row.productCode) lines.push(`Код: ${row.productCode}`);
   });
-  lines.push("", `OCR: ${Math.round(result.ocrConfidence)}%`, "Оригинальный скриншот находится в рабочем чате.");
+
+  if (history && history.events > 0) {
+    lines.push(
+      "",
+      `За ${history.periodDays} дней: ${history.events} проблемных поставок · ${history.items} позиций · +${quantity(history.excessQuantity)} ед.`
+    );
+  }
+
+  if (result.ocrConfidence < 60) lines.push("", `🔴 Низкая точность распознавания: ${Math.round(result.ocrConfidence)}%. Обязательно проверьте скриншот.`);
+  else if (result.ocrConfidence < 85) lines.push("", `⚠️ Точность распознавания: ${Math.round(result.ocrConfidence)}%. Желательна ручная проверка.`);
+
+  lines.push("", "Нажмите на прикреплённый скриншот для проверки.");
   return lines.join("\n");
 }
