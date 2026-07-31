@@ -12,17 +12,16 @@ function stringValue(value: unknown): string | null {
 }
 
 function imageUrl(payload: RecordValue): string | null {
-  const direct = stringValue(payload.url) ?? stringValue(payload.download_url) ?? stringValue(payload.downloadUrl);
-  if (direct) return direct;
   const photos = record(payload.photos);
-  if (!photos) return null;
-  const preferred = ["xxl", "xl", "large", "big", "medium", "small"];
-  for (const key of preferred) {
-    const value = photos[key];
-    const url = stringValue(value) ?? stringValue(record(value)?.url);
-    if (url) return url;
+  if (photos) {
+    const preferred = ["xxl", "xl", "large", "big", "medium", "small"];
+    for (const key of preferred) {
+      const value = photos[key];
+      const url = stringValue(value) ?? stringValue(record(value)?.url);
+      if (url) return url;
+    }
   }
-  return null;
+  return stringValue(payload.url) ?? stringValue(payload.download_url) ?? stringValue(payload.downloadUrl);
 }
 
 export function extractMaxImages(update: MaxUpdate): IncomingMaxImage[] {
