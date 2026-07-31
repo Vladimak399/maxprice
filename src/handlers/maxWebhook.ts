@@ -14,6 +14,8 @@ import type { ExtractedMaxUpdate, MaxUpdate } from "../types/max";
 import { isWebhookSecretValid, shouldNotifyUnknownChats } from "../utils/auth";
 import { extractMaxImages } from "../max/imageAttachments";
 import { processUnorderedGoodsUpdate } from "../unorderedGoods/bot";
+import { getUnorderedGoodsChatStats } from "../unorderedGoods/repository";
+import { formatUnorderedGoodsStats, parseUnorderedGoodsStatsCommand } from "../unorderedGoods/statsCommands";
 
 const BASIC_COMMANDS = new Set(["/start", "start", "меню", "/menu", "help", "помощь", "debug"]);
 const DB_UNAVAILABLE_MESSAGE = "Бот работает. База данных не настроена, поэтому HR-опросы и база знаний недоступны. Мониторинг цен работает через настроенные чаты.";
@@ -55,6 +57,32 @@ async function handleCommand(update: ExtractedMaxUpdate): Promise<boolean> {
   return true;
 }
 
+async function handleUnorderedGoodsStatsCommand(update: ExtractedMaxUpdate): Promise<boolean> {
+  const command = parseUnorderedGoodsStatsCommand(update.text);
+  if (!command) return false;
+  if (command.kind === "help") {
+    await sendMessage(targetFor(update), formatUnorderedGoodsStats(command, {
+      periodDays: command.periodDays,
+      totals: { events: 0, items: 0, counterparties: 0, excessQuantity: 0 },
+      suppliers: [],
+      products: []
+    }));
+    return true;
+  }
+  if (!isDatabaseConfigured()) {
+    await sendMessage(targetFor(update), "Статистика пока недоступна: база данных не настроена.");
+    return true;
+  }
+  try {
+    const stats = await getUnorderedGoodsChatStats(command.periodDays);
+    await sendMessage(targetFor(update), formatUnorderedGoodsStats(command, stats));
+  } catch (error) {
+    console.warn("Unordered-goods stats command failed", error);
+    await sendMessage(targetFor(update), "Не удалось получить статистику. Попробуйте команду ещё раз позже.");
+  }
+  return true;
+}
+
 async function processPriceUpdate(update: MaxUpdate, chatId: string): Promise<void> {
   const extracted = extractMaxUpdate(update);
   const config = getChatConfig(chatId);
@@ -77,7 +105,8 @@ export function analyzeWebhookUpdate(update: MaxUpdate) {
   const config = getChatConfig(extracted.chatId);
   const parseResult = parsePriceMessage(extracted.text);
   const reportChunksCount = formatReportChunks(parseResult).length;
-  const commandDetected = isBasicMaxCommand(extracted.text) || isMenuCommand(extracted.text);
+  const statsCommandDetected = Boolean(parseUnorderedGoodsStatsCommand(extracted.text));
+  const commandDetected = isBasicMaxCommand(extracted.text) || isMenuCommand(extracted.text) || statsCommandDetected;
   const target = resolveTarget(config);
   let reason = "Webhook would ignore this update.";
   if (!isMessageCreated(extracted.updateType) && extracted.updateType !== "bot_started") reason = "Update type is not message_created or bot_started.";
@@ -88,14 +117,15 @@ export function analyzeWebhookUpdate(update: MaxUpdate) {
   else if (config?.enabled && config.mode === "unordered_goods") reason = extracted.text || extractMaxImages(update).length ? "Webhook would analyze image attachments for marked unordered-goods rows." : "Webhook would wait for an image attachment.";
   else if (config && !config.enabled) reason = "Chat config is disabled.";
   else if (!config) reason = "No chat config found; webhook would treat this as an unknown chat unless it is a private dialog.";
-  return { extracted, isMessageCreated: isMessageCreated(extracted.updateType), isPrivateDialog: Boolean(extracted.userId && extracted.chatId && !extracted.chatId.startsWith("-")), chatConfig: config, enabled: config?.enabled ?? null, mode: config?.mode ?? null, target, parsePriceMessage: parseResult, reportChunksCount, reason };
+  return { extracted, isMessageCreated: isMessageCreated(extracted.updateType), isPrivateDialog: Boolean(extracted.userId && extracted.chatId && !extracted.chatId.startsWith("-")), chatConfig: config, enabled: config?.enabled ?? null, mode: config?.mode ?? null, target, parsePriceMessage: parseResult, reportChunksCount, statsCommandDetected, reason };
 }
 
 async function processUpdate(update: MaxUpdate): Promise<void> {
   const extracted = extractMaxUpdate(update);
   const isPrivateDialog = Boolean(extracted.userId && extracted.chatId && !extracted.chatId.startsWith("-"));
   const config = getChatConfig(extracted.chatId);
-  const commandDetected = isBasicMaxCommand(extracted.text) || isMenuCommand(extracted.text);
+  const statsCommand = parseUnorderedGoodsStatsCommand(extracted.text);
+  const commandDetected = isBasicMaxCommand(extracted.text) || isMenuCommand(extracted.text) || Boolean(statsCommand);
   console.log("MAX webhook received update", { updateType: extracted.updateType, chatId: extracted.chatId, userIdExists: Boolean(extracted.userId), textPreview: previewText(extracted.text), configFound: Boolean(config), commandDetected });
   if (isPrivateDialog || extracted.updateType === "bot_started") await safeRememberMaxBotUser(extracted);
 
@@ -112,7 +142,9 @@ async function processUpdate(update: MaxUpdate): Promise<void> {
   const hasImages = extractMaxImages(update).length > 0;
   if (!extracted.text.trim() && !hasImages) return;
 
-  if (commandDetected) { console.log("MAX webhook route selected", { route: "command" }); await handleCommand(extracted); return; }
+  const supportsSupplyStats = config?.enabled && (config.mode === "price_changes" || config.mode === "unordered_goods");
+  if (statsCommand && supportsSupplyStats) { console.log("MAX webhook route selected", { route: "unordered_goods_stats", kind: statsCommand.kind, periodDays: statsCommand.periodDays }); await handleUnorderedGoodsStatsCommand(extracted); return; }
+  if (isBasicMaxCommand(extracted.text) || isMenuCommand(extracted.text)) { console.log("MAX webhook route selected", { route: "command" }); await handleCommand(extracted); return; }
 
   if (config) {
     if (!config.enabled) return;
