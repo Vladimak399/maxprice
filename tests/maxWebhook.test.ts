@@ -27,10 +27,19 @@ describe("MAX webhook command routing", () => {
     expect(result.chatConfig?.mode).toBe("price_changes");
   });
 
-  it("detects supply statistics commands before price parsing", () => {
+  it("routes supply statistics commands from the notification chat", () => {
     process.env.CHAT_CONFIGS_JSON = JSON.stringify({ source: { name: "Операторы цены", mode: "price_changes", enabled: true, sendTo: "chat", targetChatId: "destination" } });
-    const result = analyzeWebhookUpdate({ update_type: "message_created", message: { recipient: { chat_id: "source" }, sender: { user_id: "user" }, body: { text: "поставщики 90" } } });
+    const result = analyzeWebhookUpdate({ update_type: "message_created", message: { recipient: { chat_id: "destination" }, sender: { user_id: "manager" }, body: { text: "поставщики 90" } } });
     expect(result.statsCommandDetected).toBe(true);
-    expect(result.reason).toContain("command before price parsing");
+    expect(result.targetSourceConfig?.chatId).toBe("source");
+    expect(result.reason).toContain("notification chat");
+  });
+
+  it("does not route supply statistics commands from the operator chat", () => {
+    process.env.CHAT_CONFIGS_JSON = JSON.stringify({ source: { name: "Операторы цены", mode: "price_changes", enabled: true, sendTo: "chat", targetChatId: "destination" } });
+    const result = analyzeWebhookUpdate({ update_type: "message_created", message: { recipient: { chat_id: "source" }, sender: { user_id: "operator" }, body: { text: "поставщики 90" } } });
+    expect(result.statsCommandDetected).toBe(true);
+    expect(result.targetSourceConfig).toBeNull();
+    expect(result.reason).not.toContain("notification chat");
   });
 });

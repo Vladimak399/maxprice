@@ -76,6 +76,16 @@ export function getChatConfig(chatId: string | null): ChatConfig | null {
   return configs[chatId] ?? null;
 }
 
+export function getSourceConfigForTarget(chatId: string | null, userId: string | null): ChatConfig | null {
+  const configs = Object.values(getAllChatConfigs());
+  return configs.find((config) => {
+    if (!config.enabled || (config.mode !== "price_changes" && config.mode !== "unordered_goods")) return false;
+    if (chatId && config.targetChatId === chatId) return true;
+    if (userId && config.targetUserId === userId) return true;
+    return false;
+  }) ?? null;
+}
+
 export function resolveTarget(config: ChatConfig | null): { userId?: string; chatId?: string } {
   const targetChatId = config?.targetChatId ?? getEnv("TARGET_CHAT_ID");
   const targetUserId = config?.targetUserId ?? getEnv("TARGET_USER_ID");

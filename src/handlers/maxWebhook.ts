@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { getChatConfig, resolveTarget } from "../config/chats";
+import { getChatConfig, getSourceConfigForTarget, resolveTarget } from "../config/chats";
 import { handleKnowledgeUpdate } from "../knowledge/bot";
 import { isDatabaseConfigured } from "../knowledge/db";
 import { isProductKnowledgeIntent } from "../knowledge/productSuppliersBot";
@@ -103,6 +103,7 @@ export type DebugWebhookDecision = ReturnType<typeof analyzeWebhookUpdate>;
 export function analyzeWebhookUpdate(update: MaxUpdate) {
   const extracted = extractMaxUpdate(update);
   const config = getChatConfig(extracted.chatId);
+  const targetSourceConfig = getSourceConfigForTarget(extracted.chatId, extracted.userId);
   const parseResult = parsePriceMessage(extracted.text);
   const reportChunksCount = formatReportChunks(parseResult).length;
   const statsCommandDetected = Boolean(parseUnorderedGoodsStatsCommand(extracted.text));
@@ -111,19 +112,21 @@ export function analyzeWebhookUpdate(update: MaxUpdate) {
   let reason = "Webhook would ignore this update.";
   if (!isMessageCreated(extracted.updateType) && extracted.updateType !== "bot_started") reason = "Update type is not message_created or bot_started.";
   else if (extracted.updateType === "bot_started") reason = "Webhook would remember user if database is configured, then send menu/fallback command response.";
-  else if (commandDetected) reason = "Webhook would handle this as a command before price parsing.";
+  else if (statsCommandDetected && targetSourceConfig) reason = "Webhook would handle supply statistics in the notification chat.";
+  else if (isBasicMaxCommand(extracted.text) || isMenuCommand(extracted.text)) reason = "Webhook would handle this as a command before price parsing.";
   else if (config?.enabled && config.mode === "price_changes" && extractMaxImages(update).length > 0) reason = "Webhook would analyze image attachments from the price-monitoring chat for marked unordered-goods rows.";
   else if (config?.enabled && config.mode === "price_changes") reason = reportChunksCount > 0 && (target.userId || target.chatId) ? "Webhook would parse price changes and send report chunks to resolved target." : "Webhook would parse prices but not send: no chunks or no target.";
   else if (config?.enabled && config.mode === "unordered_goods") reason = extracted.text || extractMaxImages(update).length ? "Webhook would analyze image attachments for marked unordered-goods rows." : "Webhook would wait for an image attachment.";
   else if (config && !config.enabled) reason = "Chat config is disabled.";
   else if (!config) reason = "No chat config found; webhook would treat this as an unknown chat unless it is a private dialog.";
-  return { extracted, isMessageCreated: isMessageCreated(extracted.updateType), isPrivateDialog: Boolean(extracted.userId && extracted.chatId && !extracted.chatId.startsWith("-")), chatConfig: config, enabled: config?.enabled ?? null, mode: config?.mode ?? null, target, parsePriceMessage: parseResult, reportChunksCount, statsCommandDetected, reason };
+  return { extracted, isMessageCreated: isMessageCreated(extracted.updateType), isPrivateDialog: Boolean(extracted.userId && extracted.chatId && !extracted.chatId.startsWith("-")), chatConfig: config, targetSourceConfig, enabled: config?.enabled ?? null, mode: config?.mode ?? null, target, parsePriceMessage: parseResult, reportChunksCount, statsCommandDetected, reason };
 }
 
 async function processUpdate(update: MaxUpdate): Promise<void> {
   const extracted = extractMaxUpdate(update);
   const isPrivateDialog = Boolean(extracted.userId && extracted.chatId && !extracted.chatId.startsWith("-"));
   const config = getChatConfig(extracted.chatId);
+  const targetSourceConfig = getSourceConfigForTarget(extracted.chatId, extracted.userId);
   const statsCommand = parseUnorderedGoodsStatsCommand(extracted.text);
   const commandDetected = isBasicMaxCommand(extracted.text) || isMenuCommand(extracted.text) || Boolean(statsCommand);
   console.log("MAX webhook received update", { updateType: extracted.updateType, chatId: extracted.chatId, userIdExists: Boolean(extracted.userId), textPreview: previewText(extracted.text), configFound: Boolean(config), commandDetected });
@@ -142,8 +145,7 @@ async function processUpdate(update: MaxUpdate): Promise<void> {
   const hasImages = extractMaxImages(update).length > 0;
   if (!extracted.text.trim() && !hasImages) return;
 
-  const supportsSupplyStats = config?.enabled && (config.mode === "price_changes" || config.mode === "unordered_goods");
-  if (statsCommand && supportsSupplyStats) { console.log("MAX webhook route selected", { route: "unordered_goods_stats", kind: statsCommand.kind, periodDays: statsCommand.periodDays }); await handleUnorderedGoodsStatsCommand(extracted); return; }
+  if (statsCommand && targetSourceConfig) { console.log("MAX webhook route selected", { route: "unordered_goods_stats", sourceChatId: targetSourceConfig.chatId, kind: statsCommand.kind, periodDays: statsCommand.periodDays }); await handleUnorderedGoodsStatsCommand(extracted); return; }
   if (isBasicMaxCommand(extracted.text) || isMenuCommand(extracted.text)) { console.log("MAX webhook route selected", { route: "command" }); await handleCommand(extracted); return; }
 
   if (config) {
