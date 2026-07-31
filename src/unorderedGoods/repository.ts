@@ -3,6 +3,7 @@ import { ensureSchema, getSql } from "../knowledge/db";
 import type { UnorderedGoodsAnalysis } from "./types";
 import type { UnorderedGoodsChatStats } from "./statsCommands";
 import type { SupplierViolationHistory } from "./formatter";
+import type { WeeklyComparison } from "./weeklyReport";
 
 export async function saveUnorderedGoodsEvent(input: { messageId: string | null; sourceChatId: string | null; sourceUserId: string | null; imageUrl: string; result: UnorderedGoodsAnalysis }): Promise<boolean> {
   await ensureSchema();
@@ -110,5 +111,48 @@ export async function getSupplierViolationHistory(counterparty: string, periodDa
     events: Number(row.events ?? 0),
     items: Number(row.items ?? 0),
     excessQuantity: Number(row.excess_quantity ?? 0)
+  };
+}
+
+export async function getWeeklyUnorderedGoodsComparison(): Promise<WeeklyComparison> {
+  await ensureSchema();
+  const sql = getSql();
+  const [totals, suppliers, products, warehouses] = await Promise.all([
+    sql`SELECT
+        count(DISTINCT e.id) FILTER (WHERE e.created_at >= now() - interval '7 days')::int AS current_events,
+        count(i.id) FILTER (WHERE e.created_at >= now() - interval '7 days')::int AS current_items,
+        COALESCE(sum(GREATEST(COALESCE(i.received_quantity, 0) - COALESCE(i.ordered_quantity, 0), 0)) FILTER (WHERE e.created_at >= now() - interval '7 days'), 0)::float AS current_excess,
+        count(DISTINCT e.id) FILTER (WHERE e.created_at < now() - interval '7 days')::int AS previous_events,
+        count(i.id) FILTER (WHERE e.created_at < now() - interval '7 days')::int AS previous_items,
+        COALESCE(sum(GREATEST(COALESCE(i.received_quantity, 0) - COALESCE(i.ordered_quantity, 0), 0)) FILTER (WHERE e.created_at < now() - interval '7 days'), 0)::float AS previous_excess
+      FROM unordered_goods_events e
+      LEFT JOIN unordered_goods_items i ON i.event_id=e.id
+      WHERE e.created_at >= now() - interval '14 days'`,
+    sql`SELECT COALESCE(e.counterparty, 'Не распознан') AS counterparty,
+        count(DISTINCT e.id)::int AS events, count(i.id)::int AS items,
+        COALESCE(sum(GREATEST(COALESCE(i.received_quantity, 0) - COALESCE(i.ordered_quantity, 0), 0)), 0)::float AS excess_quantity
+      FROM unordered_goods_events e LEFT JOIN unordered_goods_items i ON i.event_id=e.id
+      WHERE e.created_at >= now() - interval '7 days'
+      GROUP BY e.counterparty ORDER BY events DESC, items DESC, excess_quantity DESC LIMIT 5`,
+    sql`SELECT COALESCE(i.product_name, 'Товар не распознан') AS product_name, COALESCE(i.product_code, '') AS product_code,
+        count(*)::int AS occurrences,
+        COALESCE(sum(GREATEST(COALESCE(i.received_quantity, 0) - COALESCE(i.ordered_quantity, 0), 0)), 0)::float AS excess_quantity
+      FROM unordered_goods_items i JOIN unordered_goods_events e ON e.id=i.event_id
+      WHERE e.created_at >= now() - interval '7 days'
+      GROUP BY i.product_name, i.product_code ORDER BY occurrences DESC, excess_quantity DESC LIMIT 5`,
+    sql`SELECT COALESCE(e.warehouse, 'Не распознан') AS warehouse,
+        count(DISTINCT e.id)::int AS events, count(i.id)::int AS items,
+        COALESCE(sum(GREATEST(COALESCE(i.received_quantity, 0) - COALESCE(i.ordered_quantity, 0), 0)), 0)::float AS excess_quantity
+      FROM unordered_goods_events e LEFT JOIN unordered_goods_items i ON i.event_id=e.id
+      WHERE e.created_at >= now() - interval '7 days'
+      GROUP BY e.warehouse ORDER BY events DESC, items DESC, excess_quantity DESC LIMIT 5`
+  ]) as [Array<Record<string, unknown>>, Array<Record<string, unknown>>, Array<Record<string, unknown>>, Array<Record<string, unknown>>];
+  const total = totals[0] ?? {};
+  return {
+    current: { events: Number(total.current_events ?? 0), items: Number(total.current_items ?? 0), excessQuantity: Number(total.current_excess ?? 0) },
+    previous: { events: Number(total.previous_events ?? 0), items: Number(total.previous_items ?? 0), excessQuantity: Number(total.previous_excess ?? 0) },
+    suppliers: suppliers.map((row) => ({ counterparty: String(row.counterparty), events: Number(row.events), items: Number(row.items), excessQuantity: Number(row.excess_quantity) })),
+    products: products.map((row) => ({ productName: String(row.product_name), productCode: String(row.product_code), occurrences: Number(row.occurrences), excessQuantity: Number(row.excess_quantity) })),
+    warehouses: warehouses.map((row) => ({ warehouse: String(row.warehouse), events: Number(row.events), items: Number(row.items), excessQuantity: Number(row.excess_quantity) }))
   };
 }

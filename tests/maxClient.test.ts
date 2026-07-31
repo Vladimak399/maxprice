@@ -33,4 +33,11 @@ describe("MAX send message body", () => {
       attachments
     });
   });
+
+  it("keeps a native link to the original MAX message", () => {
+    expect(buildSendMessageBody("alert", { link: { type: "forward", mid: "message.123" } })).toEqual({
+      text: "alert",
+      link: { type: "forward", mid: "message.123" }
+    });
+  });
 });

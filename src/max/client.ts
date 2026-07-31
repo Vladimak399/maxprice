@@ -2,7 +2,7 @@ import { Agent, request as httpsRequest } from "node:https";
 import { rootCertificates } from "node:tls";
 import { requireEnv } from "../utils/env";
 import { chunkText } from "../utils/text";
-import type { MaxAttachment } from "../types/max";
+import type { MaxAttachment, MaxMessageLink } from "../types/max";
 import { RUSSIAN_TRUSTED_ROOT_CA } from "./russianTrustedRoot";
 
 const MAX_API_BASE_URL = "https://platform-api2.max.ru";
@@ -58,12 +58,13 @@ async function requestMax(path: string, options: RequestInit): Promise<unknown> 
   });
 }
 
-type SendMessageOptions = { attachments?: MaxAttachment[] };
+type SendMessageOptions = { attachments?: MaxAttachment[]; link?: MaxMessageLink };
 
-export function buildSendMessageBody(text: string, options: SendMessageOptions = {}): { text: string; attachments?: MaxAttachment[] } {
+export function buildSendMessageBody(text: string, options: SendMessageOptions = {}): { text: string; attachments?: MaxAttachment[]; link?: MaxMessageLink } {
   return {
     text,
-    ...(options.attachments ? { attachments: options.attachments } : {})
+    ...(options.attachments ? { attachments: options.attachments } : {}),
+    ...(options.link ? { link: options.link } : {})
   };
 }
 
@@ -72,7 +73,10 @@ export async function sendMessageToUser(userId: string, text: string, options: S
   for (const [index, chunk] of chunks.entries()) {
     await requestMax(`/messages?user_id=${encodeURIComponent(userId)}`, {
       method: "POST",
-      body: JSON.stringify(buildSendMessageBody(chunk, { attachments: index === chunks.length - 1 ? options.attachments : undefined }))
+      body: JSON.stringify(buildSendMessageBody(chunk, {
+        attachments: index === chunks.length - 1 ? options.attachments : undefined,
+        link: index === chunks.length - 1 ? options.link : undefined
+      }))
     });
   }
 }
@@ -82,7 +86,10 @@ export async function sendMessageToChat(chatId: string, text: string, options: S
   for (const [index, chunk] of chunks.entries()) {
     await requestMax(`/messages?chat_id=${encodeURIComponent(chatId)}`, {
       method: "POST",
-      body: JSON.stringify(buildSendMessageBody(chunk, { attachments: index === chunks.length - 1 ? options.attachments : undefined }))
+      body: JSON.stringify(buildSendMessageBody(chunk, {
+        attachments: index === chunks.length - 1 ? options.attachments : undefined,
+        link: index === chunks.length - 1 ? options.link : undefined
+      }))
     });
   }
 }

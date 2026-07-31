@@ -15,14 +15,19 @@ export type MaxSendMessageBody = {
 };
 
 export type MaxMessageButton = {
-  type: "message" | "link";
+  type: "message";
   text: string;
-  url?: string;
 };
 
-export type MaxAttachment =
-  | { type: "inline_keyboard"; payload: { buttons: MaxMessageButton[][] } }
-  | { type: "image"; payload: { url: string } };
+export type MaxAttachment = {
+  type: "inline_keyboard";
+  payload: { buttons: MaxMessageButton[][] };
+};
+
+export type MaxMessageLink = {
+  type: "forward" | "reply";
+  mid: string;
+};
 
 export type RegisterWebhookBody = {
   url?: string;

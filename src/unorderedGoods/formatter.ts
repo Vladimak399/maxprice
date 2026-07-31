@@ -57,6 +57,6 @@ export function formatUnorderedGoodsAlert(result: UnorderedGoodsAnalysis, histor
   if (result.ocrConfidence < 60) lines.push("", `🔴 Низкая точность распознавания: ${Math.round(result.ocrConfidence)}%. Обязательно проверьте скриншот.`);
   else if (result.ocrConfidence < 85) lines.push("", `⚠️ Точность распознавания: ${Math.round(result.ocrConfidence)}%. Желательна ручная проверка.`);
 
-  lines.push("", "Нажмите на прикреплённый скриншот для проверки.");
+  lines.push("", "Откройте связанное исходное сообщение для проверки скриншота.");
   return lines.join("\n");
 }

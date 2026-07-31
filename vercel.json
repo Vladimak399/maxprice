@@ -4,6 +4,15 @@
   "functions": {
     "app/api/max/**/route.ts": {
       "includeFiles": "certs/**"
+    },
+    "app/api/cron/**/route.ts": {
+      "includeFiles": "certs/**"
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/unordered-goods-weekly",
+      "schedule": "0 6 * * 1"
+    }
+  ]
 }

@@ -39,12 +39,14 @@ export async function processUnorderedGoodsUpdate(update: MaxUpdate, config: Cha
       if (isNew) {
         stage = "notification";
         const text = formatUnorderedGoodsAlert(result, history);
-        try {
-          await sendMessage(target, text, { attachments: [{ type: "image", payload: { url: image.url } }] });
-        } catch (error) {
-          console.warn("Failed to attach original screenshot; sending text-only alert", error);
-          await sendMessage(target, `${text}\n\n⚠️ Исходный скриншот не удалось прикрепить.`);
-        }
+        if (extracted.messageId) {
+          try {
+            await sendMessage(target, text, { link: { type: "forward", mid: extracted.messageId } });
+          } catch (error) {
+            console.warn("Failed to link original MAX message; sending text-only alert", error);
+            await sendMessage(target, `${text}\n\n⚠️ Не удалось добавить ссылку на исходное сообщение.`);
+          }
+        } else await sendMessage(target, `${text}\n\n⚠️ MAX не передал идентификатор исходного сообщения.`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
