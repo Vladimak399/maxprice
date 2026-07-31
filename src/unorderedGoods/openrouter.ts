@@ -72,16 +72,28 @@ async function prepareVisionImage(image: Buffer): Promise<Buffer> {
 export async function analyzeWithOpenRouter(image: Buffer): Promise<UnorderedGoodsAnalysis> {
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) throw new Error("OPENROUTER_API_KEY is not configured");
-  const preparedImage = await prepareVisionImage(image);
+  let preparedImage = image;
+  try { preparedImage = await prepareVisionImage(image); }
+  catch (error) { console.warn("Failed to prepare marked-row composite; sending original image to OpenRouter", { message: error instanceof Error ? error.message : String(error) }); }
   const metadata = await sharp(preparedImage).metadata();
   const mime = metadata.format === "png" ? "image/png" : metadata.format === "webp" ? "image/webp" : "image/jpeg";
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": process.env.PUBLIC_WEBHOOK_URL?.trim() ?? "https://maxprice.vercel.app", "X-Title": "maxprice unordered goods" },
-    body: JSON.stringify({ model: process.env.OPENROUTER_VISION_MODEL?.trim() || DEFAULT_MODEL, temperature: 0, max_tokens: 2500, response_format: responseSchema(), messages: [{ role: "user", content: [{ type: "text", text: PROMPT }, { type: "image_url", image_url: { url: `data:${mime};base64,${preparedImage.toString("base64")}` } }] }] }),
-    signal: AbortSignal.timeout(50_000)
-  });
-  const payload = await response.json() as unknown;
-  if (!response.ok) throw new Error(`OpenRouter request failed: ${response.status} ${JSON.stringify(payload).slice(0, 300)}`);
-  return mapVisionResponse(parseContent(payload));
+  const body = JSON.stringify({ model: process.env.OPENROUTER_VISION_MODEL?.trim() || DEFAULT_MODEL, temperature: 0, max_tokens: 2500, response_format: responseSchema(), messages: [{ role: "user", content: [{ type: "text", text: PROMPT }, { type: "image_url", image_url: { url: `data:${mime};base64,${preparedImage.toString("base64")}` } }] }] });
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": process.env.PUBLIC_WEBHOOK_URL?.trim() ?? "https://maxprice.vercel.app", "X-Title": "maxprice unordered goods" },
+        body,
+        signal: AbortSignal.timeout(22_000)
+      });
+      const payload = await response.json() as unknown;
+      if (!response.ok) throw new Error(`OpenRouter request failed: ${response.status} ${JSON.stringify(payload).slice(0, 300)}`);
+      return mapVisionResponse(parseContent(payload));
+    } catch (error) {
+      lastError = error;
+      console.warn("OpenRouter vision attempt failed", { attempt, message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }

@@ -9,6 +9,16 @@ import { formatUnorderedGoodsAlert, type SupplierViolationHistory } from "./form
 import { analyzeScreenshot } from "./analyzer";
 import { getSupplierViolationHistory, saveUnorderedGoodsEvent } from "./repository";
 
+export function recognitionFailureReason(message: string): string {
+  if (/OpenRouter request failed: 401/.test(message)) return "OpenRouter отклонил API-ключ";
+  if (/OpenRouter request failed: 402/.test(message)) return "на балансе OpenRouter недостаточно средств";
+  if (/OpenRouter request failed: 429/.test(message)) return "OpenRouter временно перегружен";
+  if (/OpenRouter request failed: 5\d\d/.test(message)) return "сервис OpenRouter временно недоступен";
+  if (/timeout|timed out|aborted/i.test(message)) return "модель не ответила вовремя";
+  if (/размеченная колонка/i.test(message)) return "не найдена красная разметка таблицы";
+  return "оба способа OCR завершились ошибкой";
+}
+
 export async function processUnorderedGoodsUpdate(update: MaxUpdate, config: ChatConfig): Promise<void> {
   const extracted = extractMaxUpdate(update);
   const images = extractMaxImages(update);
@@ -51,7 +61,7 @@ export async function processUnorderedGoodsUpdate(update: MaxUpdate, config: Cha
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("Unordered goods screenshot processing failed", { messageId: extracted.messageId, stage, message, stack: error instanceof Error ? error.stack : undefined });
-      const reason = stage === "download" ? "не удалось скачать изображение из MAX" : stage === "recognition" ? message.includes("размеченная колонка") ? "не найдена красная разметка таблицы" : "не запустился OCR" : stage === "notification" ? "не удалось отправить уведомление" : "не удалось сохранить статистику";
+      const reason = stage === "download" ? "не удалось скачать изображение из MAX" : stage === "recognition" ? recognitionFailureReason(message) : stage === "notification" ? "не удалось отправить уведомление" : "не удалось сохранить статистику";
       await sendMessage(target, `⚠️ Получен скриншот поступления, но обработка не завершена. Причина: ${reason}. Код этапа: ${stage}. Проверьте оригинал в рабочем чате.`);
     }
   }
