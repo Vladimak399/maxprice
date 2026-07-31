@@ -3,6 +3,7 @@ import { detectMarkedRows } from "./imageAnalysis";
 import type { MarkedTableRow, UnorderedGoodsAnalysis } from "./types";
 
 const DEFAULT_MODEL = "qwen/qwen3.7-flash";
+const DEFAULT_BACKUP_MODEL = "google/gemini-3.5-flash-lite";
 
 const PROMPT = `Проанализируй подготовленное изображение документа поступления товаров из 1С.
 В верхней части находится шапка исходного документа. Ниже отдельно и крупно показаны строки, которые локальный алгоритм нашёл по красной заливке. Проверь КАЖДУЮ из этих увеличенных строк.
@@ -55,18 +56,18 @@ async function prepareVisionImage(image: Buffer): Promise<Buffer> {
   if (!marker?.markedIndexes.length) return image;
   const metadata = await sharp(image).metadata();
   const width = metadata.width ?? 1920;
-  const targetWidth = Math.min(2880, Math.round(width * 1.5));
+  const targetWidth = Math.min(2000, Math.max(width, Math.round(width * 1.15)));
   const parts: Buffer[] = [];
-  parts.push(await sharp(image).extract({ left: 0, top: 0, width, height: Math.min(marker.y, metadata.height ?? marker.y) }).resize({ width: targetWidth }).png().toBuffer());
+  parts.push(await sharp(image).extract({ left: 0, top: 0, width, height: Math.min(marker.y, metadata.height ?? marker.y) }).resize({ width: targetWidth }).jpeg({ quality: 86 }).toBuffer());
   for (const index of marker.markedIndexes) {
     const top = Math.floor(marker.y + index * marker.height / marker.rowCount);
     const bottom = Math.floor(marker.y + (index + 1) * marker.height / marker.rowCount);
-    parts.push(await sharp(image).extract({ left: 0, top, width, height: Math.max(1, bottom - top) }).resize({ width: targetWidth }).extend({ top: 8, bottom: 8, background: "white" }).png().toBuffer());
+    parts.push(await sharp(image).extract({ left: 0, top, width, height: Math.max(1, bottom - top) }).resize({ width: targetWidth }).extend({ top: 6, bottom: 6, background: "white" }).jpeg({ quality: 88 }).toBuffer());
   }
   const heights = await Promise.all(parts.map(async (part) => (await sharp(part).metadata()).height ?? 1));
   let offset = 0;
   const composites = parts.map((part, index) => { const top = offset; offset += heights[index]!; return { input: part, left: 0, top }; });
-  return sharp({ create: { width: targetWidth, height: offset, channels: 3, background: "white" } }).composite(composites).png().toBuffer();
+  return sharp({ create: { width: targetWidth, height: offset, channels: 3, background: "white" } }).composite(composites).jpeg({ quality: 86 }).toBuffer();
 }
 
 export async function analyzeWithOpenRouter(image: Buffer): Promise<UnorderedGoodsAnalysis> {
@@ -77,22 +78,25 @@ export async function analyzeWithOpenRouter(image: Buffer): Promise<UnorderedGoo
   catch (error) { console.warn("Failed to prepare marked-row composite; sending original image to OpenRouter", { message: error instanceof Error ? error.message : String(error) }); }
   const metadata = await sharp(preparedImage).metadata();
   const mime = metadata.format === "png" ? "image/png" : metadata.format === "webp" ? "image/webp" : "image/jpeg";
-  const body = JSON.stringify({ model: process.env.OPENROUTER_VISION_MODEL?.trim() || DEFAULT_MODEL, temperature: 0, max_tokens: 2500, response_format: responseSchema(), messages: [{ role: "user", content: [{ type: "text", text: PROMPT }, { type: "image_url", image_url: { url: `data:${mime};base64,${preparedImage.toString("base64")}` } }] }] });
+  const primaryModel = process.env.OPENROUTER_VISION_MODEL?.trim() || DEFAULT_MODEL;
+  const backupModel = process.env.OPENROUTER_BACKUP_VISION_MODEL?.trim() || DEFAULT_BACKUP_MODEL;
+  const models = [...new Set([primaryModel, backupModel])];
   let lastError: unknown = null;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (const [index, model] of models.entries()) {
     try {
+      const body = JSON.stringify({ model, temperature: 0, max_tokens: 1400, reasoning: { enabled: false }, response_format: responseSchema(), messages: [{ role: "user", content: [{ type: "text", text: PROMPT }, { type: "image_url", image_url: { url: `data:${mime};base64,${preparedImage.toString("base64")}` } }] }] });
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "HTTP-Referer": process.env.PUBLIC_WEBHOOK_URL?.trim() ?? "https://maxprice.vercel.app", "X-Title": "maxprice unordered goods" },
         body,
-        signal: AbortSignal.timeout(22_000)
+        signal: AbortSignal.timeout(24_000)
       });
       const payload = await response.json() as unknown;
       if (!response.ok) throw new Error(`OpenRouter request failed: ${response.status} ${JSON.stringify(payload).slice(0, 300)}`);
       return mapVisionResponse(parseContent(payload));
     } catch (error) {
       lastError = error;
-      console.warn("OpenRouter vision attempt failed", { attempt, message: error instanceof Error ? error.message : String(error) });
+      console.warn("OpenRouter vision attempt failed", { attempt: index + 1, model, message: error instanceof Error ? error.message : String(error) });
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
