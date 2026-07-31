@@ -6,7 +6,7 @@ import { sendMessage } from "../max/client";
 import { extractMaxUpdate } from "../max/updateExtractor";
 import type { MaxUpdate } from "../types/max";
 import { formatUnorderedGoodsAlert } from "./formatter";
-import { analyzeUnorderedGoodsScreenshot } from "./ocr";
+import { analyzeScreenshot } from "./analyzer";
 import { saveUnorderedGoodsEvent } from "./repository";
 
 export async function processUnorderedGoodsUpdate(update: MaxUpdate, config: ChatConfig): Promise<void> {
@@ -21,7 +21,7 @@ export async function processUnorderedGoodsUpdate(update: MaxUpdate, config: Cha
     try {
       const buffer = await downloadMaxImage(image.url);
       stage = "recognition";
-      const result = await analyzeUnorderedGoodsScreenshot(buffer);
+      const result = await analyzeScreenshot(buffer);
       if (!result.markedRows.length) continue;
       stage = "database";
       let isNew = true;
