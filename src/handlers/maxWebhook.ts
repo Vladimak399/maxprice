@@ -83,6 +83,7 @@ export function analyzeWebhookUpdate(update: MaxUpdate) {
   if (!isMessageCreated(extracted.updateType) && extracted.updateType !== "bot_started") reason = "Update type is not message_created or bot_started.";
   else if (extracted.updateType === "bot_started") reason = "Webhook would remember user if database is configured, then send menu/fallback command response.";
   else if (commandDetected) reason = "Webhook would handle this as a command before price parsing.";
+  else if (config?.enabled && config.mode === "price_changes" && extractMaxImages(update).length > 0) reason = "Webhook would analyze image attachments from the price-monitoring chat for marked unordered-goods rows.";
   else if (config?.enabled && config.mode === "price_changes") reason = reportChunksCount > 0 && (target.userId || target.chatId) ? "Webhook would parse price changes and send report chunks to resolved target." : "Webhook would parse prices but not send: no chunks or no target.";
   else if (config?.enabled && config.mode === "unordered_goods") reason = extracted.text || extractMaxImages(update).length ? "Webhook would analyze image attachments for marked unordered-goods rows." : "Webhook would wait for an image attachment.";
   else if (config && !config.enabled) reason = "Chat config is disabled.";
@@ -115,7 +116,11 @@ async function processUpdate(update: MaxUpdate): Promise<void> {
 
   if (config) {
     if (!config.enabled) return;
-    if (config.mode === "price_changes" && extracted.chatId) { console.log("MAX webhook route selected", { route: "price_changes" }); await processPriceUpdate(update, extracted.chatId); return; }
+    if (config.mode === "price_changes" && extracted.chatId) {
+      if (hasImages) { console.log("MAX webhook route selected", { route: "unordered_goods_from_price_chat", images: extractMaxImages(update).length }); await processUnorderedGoodsUpdate(update, config); }
+      if (extracted.text.trim()) { console.log("MAX webhook route selected", { route: "price_changes" }); await processPriceUpdate(update, extracted.chatId); }
+      return;
+    }
     if (config.mode === "unordered_goods") { console.log("MAX webhook route selected", { route: "unordered_goods", images: extractMaxImages(update).length }); await processUnorderedGoodsUpdate(update, config); return; }
     if (!isDatabaseConfigured()) { console.warn("Database is not configured; skipping knowledge/HR chat route", { chatId: extracted.chatId, mode: config.mode }); return; }
     console.log("MAX webhook route selected", { route: "knowledge" });
