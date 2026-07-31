@@ -2,7 +2,7 @@ import type { ChatConfig } from "../config/chats";
 import { resolveTarget } from "../config/chats";
 import { isDatabaseConfigured } from "../knowledge/db";
 import { downloadMaxImage, extractMaxImages } from "../max/imageAttachments";
-import { sendMessage } from "../max/client";
+import { getMessageUrl, sendMessage } from "../max/client";
 import { extractMaxUpdate } from "../max/updateExtractor";
 import type { MaxUpdate } from "../types/max";
 import { formatUnorderedGoodsAlert, type SupplierViolationHistory } from "./formatter";
@@ -39,14 +39,14 @@ export async function processUnorderedGoodsUpdate(update: MaxUpdate, config: Cha
       if (isNew) {
         stage = "notification";
         const text = formatUnorderedGoodsAlert(result, history);
+        let sourceUrl: string | null = null;
         if (extracted.messageId) {
-          try {
-            await sendMessage(target, text, { link: { type: "forward", mid: extracted.messageId } });
-          } catch (error) {
-            console.warn("Failed to link original MAX message; sending text-only alert", error);
-            await sendMessage(target, `${text}\n\n⚠️ Не удалось добавить ссылку на исходное сообщение.`);
-          }
-        } else await sendMessage(target, `${text}\n\n⚠️ MAX не передал идентификатор исходного сообщения.`);
+          try { sourceUrl = await getMessageUrl(extracted.messageId); }
+          catch (error) { console.warn("Failed to resolve original MAX message URL", error); }
+        }
+        await sendMessage(target, text);
+        if (sourceUrl) await sendMessage(target, "🔗 Исходный скриншот операторов", { attachments: [{ type: "inline_keyboard", payload: { buttons: [[{ type: "link", text: "Открыть исходное сообщение", url: sourceUrl }]] } }] });
+        else await sendMessage(target, "⚠️ MAX не предоставил ссылку на исходное сообщение. Скриншот можно проверить в чате операторов.");
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

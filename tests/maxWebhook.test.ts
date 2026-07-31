@@ -42,4 +42,12 @@ describe("MAX webhook command routing", () => {
     expect(result.targetSourceConfig).toBeNull();
     expect(result.reason).not.toContain("notification chat");
   });
+
+  it("routes statistics from the global TARGET_CHAT_ID notification chat", () => {
+    process.env.TARGET_CHAT_ID = "destination";
+    process.env.CHAT_CONFIGS_JSON = JSON.stringify({ source: { name: "Операторы цены", mode: "price_changes", enabled: true, sendTo: "chat" } });
+    const result = analyzeWebhookUpdate({ update_type: "message_created", message: { recipient: { chat_id: "destination" }, sender: { user_id: "manager" }, body: { text: "статистика" } } });
+    expect(result.targetSourceConfig?.chatId).toBe("source");
+    expect(result.reason).toContain("notification chat");
+  });
 });

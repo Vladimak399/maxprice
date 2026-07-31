@@ -11,6 +11,15 @@ function quantity(value: number | null): string {
   return value === null ? "?" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(value);
 }
 
+function plural(value: number, one: string, few: string, many: string): string {
+  const mod100 = Math.abs(value) % 100;
+  const mod10 = mod100 % 10;
+  if (mod100 >= 11 && mod100 <= 19) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
 function isUnordered(row: MarkedTableRow): boolean {
   return row.receivedQuantity !== null && (row.orderedQuantity === null || row.orderedQuantity === 0);
 }
@@ -50,13 +59,12 @@ export function formatUnorderedGoodsAlert(result: UnorderedGoodsAnalysis, histor
   if (history && history.events > 0) {
     lines.push(
       "",
-      `За ${history.periodDays} дней: ${history.events} проблемных поставок · ${history.items} позиций · +${quantity(history.excessQuantity)} ед.`
+      `За ${history.periodDays} дней: ${history.events} ${plural(history.events, "проблемная поставка", "проблемные поставки", "проблемных поставок")} · ${history.items} ${plural(history.items, "позиция", "позиции", "позиций")} · +${quantity(history.excessQuantity)} ед.`
     );
   }
 
   if (result.ocrConfidence < 60) lines.push("", `🔴 Низкая точность распознавания: ${Math.round(result.ocrConfidence)}%. Обязательно проверьте скриншот.`);
   else if (result.ocrConfidence < 85) lines.push("", `⚠️ Точность распознавания: ${Math.round(result.ocrConfidence)}%. Желательна ручная проверка.`);
 
-  lines.push("", "Откройте связанное исходное сообщение для проверки скриншота.");
   return lines.join("\n");
 }

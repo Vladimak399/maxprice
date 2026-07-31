@@ -30,7 +30,7 @@ describe("unordered goods notification formatter", () => {
     const text = formatUnorderedGoodsAlert(analysis(), { periodDays: 30, events: 3, items: 5, excessQuantity: 48 });
     expect(text).toContain("🚨 ПРЕВЫШЕНИЕ ЗАКАЗА");
     expect(text).toContain("заказ 12 · поступило 24 · лишнее +12");
-    expect(text).toContain("За 30 дней: 3 проблемных поставок");
+    expect(text).toContain("За 30 дней: 3 проблемные поставки");
     expect(text).not.toContain("OCR:");
   });
 

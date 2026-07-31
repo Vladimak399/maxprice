@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { buildSendMessageBody, getMaxAuthHeader } from "../src/max/client";
+import { buildSendMessageBody, extractMessageUrl, getMaxAuthHeader } from "../src/max/client";
 import type { MaxAttachment } from "../src/types/max";
 
 describe("MAX auth header", () => {
@@ -39,5 +39,16 @@ describe("MAX send message body", () => {
       text: "alert",
       link: { type: "forward", mid: "message.123" }
     });
+  });
+
+  it("extracts only trusted MAX message URLs", () => {
+    expect(extractMessageUrl({ messages: [{ url: "https://max.ru/jump?chat=1&message=2" }] })).toBe("https://max.ru/jump?chat=1&message=2");
+    expect(extractMessageUrl({ messages: [{ url: "https://example.com/fake" }] })).toBeNull();
+    expect(extractMessageUrl({ messages: [] })).toBeNull();
+  });
+
+  it("supports a link button to the source message", () => {
+    const attachments: MaxAttachment[] = [{ type: "inline_keyboard", payload: { buttons: [[{ type: "link", text: "Открыть", url: "https://max.ru/source" }]] } }];
+    expect(buildSendMessageBody("source", { attachments })).toEqual({ text: "source", attachments });
   });
 });

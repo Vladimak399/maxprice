@@ -80,8 +80,9 @@ export function getSourceConfigForTarget(chatId: string | null, userId: string |
   const configs = Object.values(getAllChatConfigs());
   return configs.find((config) => {
     if (!config.enabled || (config.mode !== "price_changes" && config.mode !== "unordered_goods")) return false;
-    if (chatId && config.targetChatId === chatId) return true;
-    if (userId && config.targetUserId === userId) return true;
+    const target = resolveTarget(config);
+    if (chatId && target.chatId === chatId) return true;
+    if (userId && target.userId === userId) return true;
     return false;
   }) ?? null;
 }

@@ -108,6 +108,22 @@ export async function sendMessage(target: { userId?: string; chatId?: string }, 
   throw new Error("No MAX target userId/chatId configured");
 }
 
+export function extractMessageUrl(response: unknown): string | null {
+  if (!response || typeof response !== "object") return null;
+  const messages = (response as { messages?: unknown }).messages;
+  if (!Array.isArray(messages) || !messages.length) return null;
+  const urlValue = (messages[0] as { url?: unknown } | null)?.url;
+  if (typeof urlValue !== "string" || !urlValue.trim()) return null;
+  const url = new URL(urlValue);
+  if (url.protocol !== "https:" || (url.hostname !== "max.ru" && !url.hostname.endsWith(".max.ru"))) return null;
+  return url.toString();
+}
+
+export async function getMessageUrl(messageId: string): Promise<string | null> {
+  const response = await requestMax(`/messages?message_ids=${encodeURIComponent(messageId)}`, { method: "GET" });
+  return extractMessageUrl(response);
+}
+
 export async function registerWebhook(url: string, updateTypes: string[], secret: string): Promise<unknown> {
   return requestMax("/subscriptions", {
     method: "POST",

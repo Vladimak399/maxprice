@@ -14,10 +14,9 @@ export type MaxSendMessageBody = {
   attachments?: MaxAttachment[];
 };
 
-export type MaxMessageButton = {
-  type: "message";
-  text: string;
-};
+export type MaxMessageButton =
+  | { type: "message"; text: string }
+  | { type: "link"; text: string; url: string };
 
 export type MaxAttachment = {
   type: "inline_keyboard";
