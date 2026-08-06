@@ -3,8 +3,10 @@ import { isDatabaseConfigured } from "../knowledge/db";
 import { sendMessage } from "../max/client";
 import { downloadMaxFile, type IncomingMaxFile } from "../max/fileAttachments";
 import type { ExtractedMaxUpdate } from "../types/max";
-import { formatExtendedDataStatus, formatHistory, formatWeather } from "./analysisFormatter";
+import { formatExtendedDataStatus, formatWeather } from "./analysisFormatter";
 import { buildForecast } from "./forecastEngine";
+import { formatForecastHistory } from "./forecastHistoryFormatter";
+import { listForecastRuns, saveForecastRun } from "./forecastRunRepository";
 import { formatUploadSuccess } from "./formatter";
 import { formatScopedManagerReport, formatScopedReturnCandidates } from "./managerReport";
 import { analyticsCategoryMenu, analyticsMainMenu, reportMenu } from "./menu";
@@ -13,10 +15,18 @@ import { parsePeriodComparisonWorkbook } from "./comparisonParser";
 import { detectForecastUploadType, uploadTypeLabel, type ForecastUploadType } from "./reportTypes";
 import { listLatestPlanFactSnapshots, savePlanFactSnapshot } from "./repository";
 import { parseSalesAnalysisWorkbook } from "./salesAnalysisParser";
-import { findCategoryFromCommand, scopeSnapshot, scopeTitle, type ManagerKey, type ReportScope } from "./scopes";
+import {
+  categoryIsActive,
+  findCategoryFromCommand,
+  scopeSnapshot,
+  scopeTitle,
+  type ManagerKey,
+  type ReportScope
+} from "./scopes";
 import { latestSupportingReports, saveSupportingReport } from "./supportingRepository";
-import type { StoredPlanFactSnapshot, WeatherSummary } from "./types";
+import type { ForecastResult, StoredPlanFactSnapshot, WeatherSummary } from "./types";
 import { getKaliningradWeatherSummary } from "./weather";
+import { ANALYTICS_WORKSPACE_TITLE } from "./workspace";
 
 function targetFor(update: ExtractedMaxUpdate): { userId?: string; chatId?: string } {
   return update.chatId ? { chatId: update.chatId } : { userId: update.userId ?? undefined };
@@ -31,7 +41,7 @@ type ForecastCommand =
   | { kind: "report"; scope: ReportScope }
   | { kind: "categories" }
   | { kind: "data" }
-  | { kind: "history" }
+  | { kind: "history"; scope: ReportScope }
   | { kind: "weather" }
   | { kind: "return"; scope: ReportScope }
   | { kind: "publish_all" }
@@ -54,6 +64,18 @@ function publishedScope(value: string): ReportScope | null {
   return category ? { kind: "category", category } : null;
 }
 
+function statisticsScope(value: string): ReportScope | null {
+  const cleaned = value
+    .replace(/^(статистика|история|прогресс|динамика)\s*/i, "")
+    .replace(/^по\s+/i, "")
+    .trim();
+  if (!cleaned || ["общий", "общий отчет", "отдел"].includes(cleaned)) return { kind: "overall" };
+  if (cleaned === "влад") return managerScope("vlad");
+  if (cleaned === "кристина") return managerScope("kristina");
+  const category = findCategoryFromCommand(cleaned.replace(/^категории?\s+/i, ""));
+  return category ? { kind: "category", category } : null;
+}
+
 export function parseForecastCommand(text: string): ForecastCommand | null {
   const value = normalize(text);
   if (["аналитика", "меню аналитики", "отчеты", "отчеты аналитики"].includes(value)) return { kind: "menu" };
@@ -64,7 +86,10 @@ export function parseForecastCommand(text: string): ForecastCommand | null {
   if (["отчет кристина", "кристина", "категории кристины"].includes(value)) return { kind: "report", scope: managerScope("kristina") };
   if (["категории", "выбрать категорию"].includes(value)) return { kind: "categories" };
   if (["данные", "data", "актуальность данных"].includes(value)) return { kind: "data" };
-  if (["история", "прогресс", "динамика"].includes(value)) return { kind: "history" };
+  if (/^(статистика|история|прогресс|динамика)(\s|$)/.test(value)) {
+    const scope = statisticsScope(value);
+    if (scope) return { kind: "history", scope };
+  }
   if (["погода", "weather"].includes(value)) return { kind: "weather" };
   if (["вернуть", "возврат", "что вернуть"].includes(value)) return { kind: "return", scope: { kind: "overall" } };
   if (["отправить отчеты в мониторинг", "опубликовать отчеты", "отправить в мониторинг"].includes(value)) return { kind: "publish_all" };
@@ -94,24 +119,72 @@ function previousForecastRatio(snapshots: StoredPlanFactSnapshot[], weather: Wea
   return buildForecast(previous, snapshots[2] ?? null, weather).forecastRevenueRatio;
 }
 
+function resultForScope(rawSnapshots: StoredPlanFactSnapshot[], scope: ReportScope, weather: WeatherSummary | null): ForecastResult | null {
+  const snapshots = scopedSnapshots(rawSnapshots, scope);
+  if (!snapshots[0]) return null;
+  return buildForecast(snapshots[0], snapshots[1] ?? null, weather, previousForecastRatio(snapshots, weather));
+}
+
+async function saveRunSafely(input: {
+  sourceUserId: string;
+  scope: ReportScope;
+  result: ForecastResult;
+  trigger: "plan_upload" | "first_view";
+  replace: boolean;
+}): Promise<void> {
+  try {
+    await saveForecastRun(input);
+  } catch (error) {
+    console.warn("Unable to archive forecast run", { scope: input.scope, error });
+  }
+}
+
+async function archiveAllCurrentForecasts(
+  sourceUserId: string,
+  rawSnapshots: StoredPlanFactSnapshot[],
+  weather: WeatherSummary | null,
+  replace: boolean
+): Promise<void> {
+  const latest = rawSnapshots[0];
+  if (!latest) return;
+  const scopes: ReportScope[] = [
+    { kind: "overall" },
+    managerScope("vlad"),
+    managerScope("kristina"),
+    ...latest.categories
+      .filter((item) => categoryIsActive(item.category, latest.reportDate))
+      .map((item) => ({ kind: "category", category: item.category }) as ReportScope)
+  ];
+  const unique = new Map<string, ReportScope>();
+  for (const scope of scopes) {
+    const key = scope.kind === "overall" ? "overall" : scope.kind === "manager" ? `manager:${scope.manager}` : `category:${scope.category}`;
+    unique.set(key, scope);
+  }
+  for (const scope of unique.values()) {
+    const result = resultForScope(rawSnapshots, scope, weather);
+    if (!result) continue;
+    await saveRunSafely({ sourceUserId, scope, result, trigger: "plan_upload", replace });
+  }
+}
+
 async function buildScopedReport(sourceUserId: string, scope: ReportScope): Promise<{
   text: string;
-  snapshots: StoredPlanFactSnapshot[];
+  result: ForecastResult;
 }> {
   const rawSnapshots = await listLatestPlanFactSnapshots(sourceUserId, 3);
-  const snapshots = scopedSnapshots(rawSnapshots, scope);
-  if (!snapshots[0]) throw new Error(`Нет план-факта для области «${scopeTitle(scope)}».`);
   const supporting = await latestSupportingReports(sourceUserId);
   const weather = await safeWeather();
-  const result = buildForecast(snapshots[0], snapshots[1] ?? null, weather, previousForecastRatio(snapshots, weather));
+  const result = resultForScope(rawSnapshots, scope, weather);
+  if (!result) throw new Error(`Нет план-факта для области «${scopeTitle(scope)}».`);
+  await saveRunSafely({ sourceUserId, scope, result, trigger: "first_view", replace: false });
   return {
+    result,
     text: formatScopedManagerReport({
       scope,
       result,
       comparisonReport: supporting.comparison,
       salesReport: supporting.sales
-    }),
-    snapshots
+    })
   };
 }
 
@@ -146,7 +219,7 @@ export async function handleForecastCommand(update: ExtractedMaxUpdate): Promise
 
   try {
     if (command.kind === "menu") {
-      await sendMessage(targetFor(update), "📊 Аналитика категорий\n\nВыберите нужный отчёт:", { attachments: analyticsMainMenu() });
+      await sendMessage(targetFor(update), `📊 ${ANALYTICS_WORKSPACE_TITLE}\n\nВыберите нужный отчёт:`, { attachments: analyticsMainMenu() });
       return true;
     }
     if (command.kind === "categories") {
@@ -155,6 +228,12 @@ export async function handleForecastCommand(update: ExtractedMaxUpdate): Promise
     }
     if (command.kind === "report") {
       await sendScopedReport(update, command.scope);
+      return true;
+    }
+    if (command.kind === "history") {
+      await buildScopedReport(update.userId, command.scope);
+      const runs = await listForecastRuns(command.scope, 120);
+      await sendMessage(targetFor(update), formatForecastHistory(command.scope, runs), { attachments: reportMenu(command.scope) });
       return true;
     }
     if (command.kind === "publish_all") {
@@ -168,7 +247,7 @@ export async function handleForecastCommand(update: ExtractedMaxUpdate): Promise
       return true;
     }
 
-    const rawSnapshots = await listLatestPlanFactSnapshots(update.userId, command.kind === "history" ? 12 : 3);
+    const rawSnapshots = await listLatestPlanFactSnapshots(update.userId, 12);
     const supporting = await latestSupportingReports(update.userId);
     if (command.kind === "data") {
       await sendMessage(targetFor(update), formatExtendedDataStatus({
@@ -176,11 +255,6 @@ export async function handleForecastCommand(update: ExtractedMaxUpdate): Promise
         comparisonReport: supporting.comparison,
         salesReport: supporting.sales
       }), { attachments: analyticsMainMenu() });
-      return true;
-    }
-    if (command.kind === "history") {
-      const snapshots = scopedSnapshots(rawSnapshots, { kind: "overall" });
-      await sendMessage(targetFor(update), formatHistory(snapshots), { attachments: analyticsMainMenu() });
       return true;
     }
     if (command.kind === "weather") {
@@ -209,11 +283,11 @@ async function processPlanFact(update: ExtractedMaxUpdate, file: IncomingMaxFile
   const parsed = parsePlanFactWorkbook(buffer, file.filename);
   await savePlanFactSnapshot({ parsed, sourceUserId: update.userId!, sourceChatId: update.chatId, messageId: update.messageId });
   const rawSnapshots = await listLatestPlanFactSnapshots(update.userId!, 3);
-  const snapshots = scopedSnapshots(rawSnapshots, { kind: "overall" });
-  if (!snapshots[0]) throw new Error("Снимок отчёта не найден после сохранения.");
   const weather = await safeWeather();
-  const result = buildForecast(snapshots[0], snapshots[1] ?? null, weather, previousForecastRatio(snapshots, weather));
-  return `${formatUploadSuccess(result, file.filename)}\n\nСезонный товар исключён из текущего прогноза до ноября.`;
+  await archiveAllCurrentForecasts(update.userId!, rawSnapshots, weather, true);
+  const result = resultForScope(rawSnapshots, { kind: "overall" }, weather);
+  if (!result) throw new Error("Снимок отчёта не найден после сохранения.");
+  return formatUploadSuccess(result, file.filename);
 }
 
 async function processSupporting(update: ExtractedMaxUpdate, file: IncomingMaxFile, buffer: Buffer, type: Exclude<ForecastUploadType, "plan_fact">): Promise<string> {
@@ -229,8 +303,7 @@ async function processSupporting(update: ExtractedMaxUpdate, file: IncomingMaxFi
       `Период: ${summary.periodStart.split("-").reverse().join(".")}–${summary.periodEnd.split("-").reverse().join(".")}`,
       `Категорий: ${summary.categories.length}, подкатегорий: ${summary.subcategories.length}`,
       "",
-      "Сезонный товар будет исключён из текущих отчётов.",
-      "Откройте «Меню аналитики» для общего отчёта или выбора категории."
+      "Откройте меню аналитики для общего отчёта или выбора категории."
     ].join("\n");
   }
   return [
@@ -243,8 +316,7 @@ async function processSupporting(update: ExtractedMaxUpdate, file: IncomingMaxFi
     `Остаток без продаж: ${summary.stockWithoutSales.length}`,
     `Излишний запас: ${summary.overstock.length}`,
     "",
-    "Сезонные позиции отфильтровываются при формировании отчётов.",
-    "Откройте «Меню аналитики» для отчётов Влада, Кристины или конкретной категории."
+    "Откройте меню аналитики для отчётов Влада, Кристины или конкретной категории."
   ].join("\n");
 }
 
