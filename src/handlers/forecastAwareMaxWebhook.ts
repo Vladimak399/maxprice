@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import baseHandler from "./maxWebhook";
+import { getSourceConfigForTarget } from "../config/chats";
 import { extractMaxFiles } from "../max/fileAttachments";
 import { extractMaxUpdate } from "../max/updateExtractor";
 import { handleForecastCommand, processForecastFiles } from "../forecast/bot";
@@ -22,9 +23,14 @@ function unwrapUpdates(body: unknown): MaxUpdate[] {
   return [];
 }
 
-function isPrivateMessage(update: MaxUpdate): boolean {
+export function isForecastMessage(update: MaxUpdate): boolean {
   const extracted = extractMaxUpdate(update);
-  return Boolean(extracted.userId && extracted.chatId && !extracted.chatId.startsWith("-") && extracted.updateType?.endsWith("message_created"));
+  const isMessageCreated = Boolean(extracted.updateType?.endsWith("message_created"));
+  const isPrivateDialog = Boolean(extracted.chatId && !extracted.chatId.startsWith("-"));
+  const isNotificationTargetChat = Boolean(
+    extracted.chatId && getSourceConfigForTarget(extracted.chatId, null)
+  );
+  return Boolean(extracted.userId && isMessageCreated && (isPrivateDialog || isNotificationTargetChat));
 }
 
 export default async function forecastAwareMaxWebhook(req: VercelRequest, res: VercelResponse): Promise<void> {
@@ -34,9 +40,15 @@ export default async function forecastAwareMaxWebhook(req: VercelRequest, res: V
   const updates = unwrapUpdates(requestBody(req));
   const unhandled: MaxUpdate[] = [];
   for (const update of updates) {
-    if (!isPrivateMessage(update)) { unhandled.push(update); continue; }
+    if (!isForecastMessage(update)) { unhandled.push(update); continue; }
     const extracted = extractMaxUpdate(update);
     const files = extractMaxFiles(update);
+    console.log("MAX forecast route candidate", {
+      chatId: extracted.chatId,
+      userIdExists: Boolean(extracted.userId),
+      files: files.length,
+      textPreview: extracted.text.trim().slice(0, 80)
+    });
     try {
       if (files.length && await processForecastFiles(extracted, files)) continue;
       if (await handleForecastCommand(extracted)) continue;
