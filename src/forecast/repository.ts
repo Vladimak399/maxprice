@@ -1,5 +1,6 @@
 import { getSql } from "../knowledge/db";
 import type { ParsedPlanFact, PlanFactLine, StoredPlanFactSnapshot } from "./types";
+import { ANALYTICS_WORKSPACE_ID } from "./workspace";
 
 let schemaPromise: Promise<void> | null = null;
 
@@ -23,6 +24,7 @@ async function createSchema(): Promise<void> {
   await sql`CREATE TABLE IF NOT EXISTS forecast_snapshots (
     id bigserial PRIMARY KEY,
     dedupe_key text NOT NULL UNIQUE,
+    workspace_id text,
     source_user_id text NOT NULL,
     source_chat_id text,
     message_id text,
@@ -38,8 +40,22 @@ async function createSchema(): Promise<void> {
     actual_margin numeric NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
   )`;
-  await sql`CREATE INDEX IF NOT EXISTS forecast_snapshots_user_date_idx ON forecast_snapshots(source_user_id, report_date DESC, created_at DESC)`;
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS forecast_snapshots_user_report_date_idx ON forecast_snapshots(source_user_id, report_date)`;
+  await sql`ALTER TABLE forecast_snapshots ADD COLUMN IF NOT EXISTS workspace_id text`;
+  await sql`UPDATE forecast_snapshots SET workspace_id=${ANALYTICS_WORKSPACE_ID}
+    WHERE workspace_id IS NULL OR workspace_id=''`;
+  await sql`DELETE FROM forecast_snapshots WHERE id IN (
+    SELECT id FROM (
+      SELECT id, row_number() OVER (PARTITION BY workspace_id, report_date ORDER BY created_at DESC, id DESC) AS row_number
+      FROM forecast_snapshots
+    ) ranked WHERE ranked.row_number > 1
+  )`;
+  await sql`UPDATE forecast_snapshots SET dedupe_key=workspace_id || ':' || report_date::text`;
+  await sql`ALTER TABLE forecast_snapshots ALTER COLUMN workspace_id SET NOT NULL`;
+  await sql`DROP INDEX IF EXISTS forecast_snapshots_user_report_date_idx`;
+  await sql`CREATE INDEX IF NOT EXISTS forecast_snapshots_workspace_date_idx
+    ON forecast_snapshots(workspace_id, report_date DESC, created_at DESC)`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS forecast_snapshots_workspace_report_date_idx
+    ON forecast_snapshots(workspace_id, report_date)`;
   await sql`CREATE TABLE IF NOT EXISTS forecast_category_snapshots (
     snapshot_id bigint NOT NULL REFERENCES forecast_snapshots(id) ON DELETE CASCADE,
     category text NOT NULL,
@@ -67,19 +83,21 @@ export async function savePlanFactSnapshot(input: {
   await ensureForecastSchema();
   const sql = getSql();
   const { parsed } = input;
-  const dedupeKey = `${input.sourceUserId}:${parsed.reportDate}`;
+  const dedupeKey = `${ANALYTICS_WORKSPACE_ID}:${parsed.reportDate}`;
   const rows = await sql`INSERT INTO forecast_snapshots (
-    dedupe_key, source_user_id, source_chat_id, message_id, filename, report_date, period_start, period_end,
+    dedupe_key, workspace_id, source_user_id, source_chat_id, message_id, filename, report_date, period_start, period_end,
     plan_revenue, plan_margin, plan_to_date_revenue, plan_to_date_margin, actual_revenue, actual_margin
   ) VALUES (
-    ${dedupeKey}, ${input.sourceUserId}, ${input.sourceChatId}, ${input.messageId}, ${parsed.filename}, ${parsed.reportDate}, ${parsed.periodStart}, ${parsed.periodEnd},
+    ${dedupeKey}, ${ANALYTICS_WORKSPACE_ID}, ${input.sourceUserId}, ${input.sourceChatId}, ${input.messageId}, ${parsed.filename}, ${parsed.reportDate}, ${parsed.periodStart}, ${parsed.periodEnd},
     ${parsed.overall.monthlyPlanRevenue}, ${parsed.overall.monthlyPlanMargin}, ${parsed.overall.planToDateRevenue}, ${parsed.overall.planToDateMargin}, ${parsed.overall.actualRevenue}, ${parsed.overall.actualMargin}
   ) ON CONFLICT (dedupe_key) DO UPDATE SET
-    source_chat_id=EXCLUDED.source_chat_id, message_id=EXCLUDED.message_id, filename=EXCLUDED.filename,
+    source_user_id=EXCLUDED.source_user_id, source_chat_id=EXCLUDED.source_chat_id,
+    message_id=EXCLUDED.message_id, filename=EXCLUDED.filename,
     report_date=EXCLUDED.report_date, period_start=EXCLUDED.period_start, period_end=EXCLUDED.period_end,
     plan_revenue=EXCLUDED.plan_revenue, plan_margin=EXCLUDED.plan_margin,
     plan_to_date_revenue=EXCLUDED.plan_to_date_revenue, plan_to_date_margin=EXCLUDED.plan_to_date_margin,
-    actual_revenue=EXCLUDED.actual_revenue, actual_margin=EXCLUDED.actual_margin
+    actual_revenue=EXCLUDED.actual_revenue, actual_margin=EXCLUDED.actual_margin,
+    created_at=now()
   RETURNING id` as Array<{ id: number | string }>;
   const snapshotId = Number(rows[0]?.id);
   if (!Number.isFinite(snapshotId) || snapshotId <= 0) throw new Error("Не удалось сохранить снимок план-факта.");
@@ -107,13 +125,16 @@ function lineFromRow(row: Record<string, unknown>): PlanFactLine {
   };
 }
 
-export async function listLatestPlanFactSnapshots(sourceUserId: string, limit = 3): Promise<StoredPlanFactSnapshot[]> {
+export async function listLatestPlanFactSnapshots(_viewerUserId: string, limit = 3): Promise<StoredPlanFactSnapshot[]> {
   await ensureForecastSchema();
   const sql = getSql();
-  const snapshotRows = await sql`SELECT * FROM forecast_snapshots WHERE source_user_id=${sourceUserId} ORDER BY report_date DESC, created_at DESC LIMIT ${limit}` as Array<Record<string, unknown>>;
+  const snapshotRows = await sql`SELECT * FROM forecast_snapshots
+    WHERE workspace_id=${ANALYTICS_WORKSPACE_ID}
+    ORDER BY report_date DESC, created_at DESC LIMIT ${limit}` as Array<Record<string, unknown>>;
   const result: StoredPlanFactSnapshot[] = [];
   for (const raw of snapshotRows) {
-    const categoryRows = await sql`SELECT category, plan_revenue, plan_margin, plan_to_date_revenue, plan_to_date_margin, actual_revenue, actual_margin FROM forecast_category_snapshots WHERE snapshot_id=${raw.id} ORDER BY category` as Array<Record<string, unknown>>;
+    const categoryRows = await sql`SELECT category, plan_revenue, plan_margin, plan_to_date_revenue, plan_to_date_margin, actual_revenue, actual_margin
+      FROM forecast_category_snapshots WHERE snapshot_id=${raw.id} ORDER BY category` as Array<Record<string, unknown>>;
     result.push({
       id: numeric(raw.id),
       sourceUserId: String(raw.source_user_id),

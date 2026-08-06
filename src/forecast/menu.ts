@@ -1,5 +1,5 @@
 import type { MaxAttachment, MaxMessageButton } from "../types/max";
-import { CATEGORY_BUTTONS, scopeTitle, type ReportScope } from "./scopes";
+import { CATEGORY_BUTTONS, MANAGER_CATEGORIES, scopeTitle, type ReportScope } from "./scopes";
 
 function message(text: string): MaxMessageButton {
   return { type: "message", text };
@@ -13,7 +13,7 @@ export function analyticsMainMenu(): MaxAttachment[] {
   return keyboard([
     [message("Общий отчёт"), message("Отчёт Влад")],
     [message("Отчёт Кристина"), message("Категории")],
-    [message("Данные"), message("История")],
+    [message("Данные"), message("Статистика")],
     [message("Погода"), message("Отправить отчёты в мониторинг")]
   ]);
 }
@@ -27,6 +27,12 @@ export function analyticsCategoryMenu(): MaxAttachment[] {
   return keyboard(rows);
 }
 
+function statisticsText(scope: ReportScope): string {
+  if (scope.kind === "overall") return "Статистика";
+  if (scope.kind === "manager") return `Статистика ${MANAGER_CATEGORIES[scope.manager].title}`;
+  return `Статистика категории ${scope.category}`;
+}
+
 export function reportMenu(scope: ReportScope): MaxAttachment[] {
   const publishText = scope.kind === "overall"
     ? "Опубликовать общий отчёт"
@@ -34,7 +40,7 @@ export function reportMenu(scope: ReportScope): MaxAttachment[] {
       ? `Опубликовать ${scopeTitle(scope)}`
       : `Опубликовать категорию ${scope.category}`;
   return keyboard([
-    [message(publishText)],
+    [message(statisticsText(scope)), message(publishText)],
     [message("Категории"), message("Меню аналитики")]
   ]);
 }

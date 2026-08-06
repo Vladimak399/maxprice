@@ -24,7 +24,9 @@ export const MANAGER_CATEGORIES: Record<ManagerKey, { title: string; categories:
       "Азиатская продукция",
       "Консервы, Соусы",
       "Снэки, быстрый перекус",
-      "Товары для животных"
+      "Товары для животных",
+      "Охлажденная продукция",
+      "Хлебобулочные изделия"
     ]
   }
 };
@@ -39,7 +41,9 @@ export const CATEGORY_BUTTONS: Array<{ label: string; category: string }> = [
   { label: "Азиатская продукция", category: "Азиатская продукция" },
   { label: "Консервы и соусы", category: "Консервы, Соусы" },
   { label: "Снэки", category: "Снэки, быстрый перекус" },
-  { label: "Товары для животных", category: "Товары для животных" }
+  { label: "Товары для животных", category: "Товары для животных" },
+  { label: "Охлажденная продукция", category: "Охлажденная продукция" },
+  { label: "Хлебобулочные изделия", category: "Хлебобулочные изделия" }
 ];
 
 export function normalizeCategory(value: string): string {
