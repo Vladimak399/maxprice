@@ -36,13 +36,8 @@ function repairCommonWorkbookPathCasing(buffer: Buffer): Buffer {
 }
 
 function readWorkbook(buffer: Buffer): XLSX.WorkBook {
-  try {
-    return XLSX.read(buffer, { type: "buffer", cellStyles: true, cellDates: true });
-  } catch (originalError) {
-    const repaired = repairCommonWorkbookPathCasing(buffer);
-    if (repaired === buffer) throw originalError;
-    return XLSX.read(repaired, { type: "buffer", cellStyles: true, cellDates: true });
-  }
+  const repaired = repairCommonWorkbookPathCasing(buffer);
+  return XLSX.read(repaired, { type: "buffer", cellStyles: true, cellDates: true });
 }
 
 function cell(sheet: XLSX.WorkSheet, address: string): unknown {
