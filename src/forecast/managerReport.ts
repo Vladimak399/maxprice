@@ -123,3 +123,28 @@ export function formatScopedManagerReport(input: {
   lines.push("Точные цены, min/max и перемещения не рассчитываются без отдельной выгрузки.");
   return lines.join("\n");
 }
+
+export function formatScopedReturnCandidates(input: {
+  scope: ReportScope;
+  reportDate: string;
+  salesReport: StoredSupportingReport | null;
+}): string {
+  const salesSummary = sales(input.salesReport);
+  if (!salesSummary) return "Для анализа возврата загрузите файл «продажи с анализом».";
+  const items = salesSummary.returnCandidates
+    .filter((item) => relevantItem(item, input.scope, input.reportDate))
+    .slice(0, 10);
+  if (!items.length) return `По области «${scopeTitle(input.scope)}» явных кандидатов на возврат не найдено.`;
+  const lines = [
+    `↩️ КАНДИДАТЫ НА ВОЗВРАТ — ${scopeTitle(input.scope).toUpperCase()}`,
+    "",
+    "Только вместо слабых позиций, без расширения полки. Сезонные товары исключены.",
+    ""
+  ];
+  items.forEach((item, index) => {
+    lines.push(`${index + 1}. ${shortName(item.name)}`);
+    lines.push(`${item.category}${item.subcategory ? ` / ${item.subcategory}` : ""}`);
+    lines.push(`В прошлом: ${Math.round(item.previousUnits)} шт., ${rub(item.previousRevenue)}. Сейчас: 0 продаж и 0 остаток.`);
+  });
+  return lines.join("\n");
+}
