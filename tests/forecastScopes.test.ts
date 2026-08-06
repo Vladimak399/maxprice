@@ -21,6 +21,8 @@ function snapshot(reportDate = "2026-08-08"): StoredPlanFactSnapshot {
     line("Напитки", 900, 220),
     line("Товары для детей", 500, 90),
     line("Азиатская продукция", 400, 70),
+    line("Охлажденная продукция", 600, 100),
+    line("Хлебобулочные изделия", 300, 80),
     line("Сезонный товар", 800, 0)
   ];
   return {
@@ -33,7 +35,7 @@ function snapshot(reportDate = "2026-08-08"): StoredPlanFactSnapshot {
     periodStart: reportDate.slice(0, 8) + "01",
     periodEnd: reportDate.slice(0, 8) + "31",
     createdAt: "2026-08-08T08:00:00Z",
-    overall: line("Продукты", 3600, 590),
+    overall: line("Продукты", 4500, 770),
     categories
   };
 }
@@ -42,8 +44,8 @@ describe("forecast report scopes", () => {
   it("excludes seasonal goods from August overall totals", () => {
     const scoped = scopeSnapshot(snapshot(), { kind: "overall" });
     expect(scoped?.categories.map((item) => item.category)).not.toContain("Сезонный товар");
-    expect(scoped?.overall.monthlyPlanRevenue).toBe(2800);
-    expect(scoped?.overall.actualRevenue).toBe(590);
+    expect(scoped?.overall.monthlyPlanRevenue).toBe(3700);
+    expect(scoped?.overall.actualRevenue).toBe(770);
   });
 
   it("keeps seasonal goods in the New Year period", () => {
@@ -60,11 +62,28 @@ describe("forecast report scopes", () => {
     ]);
   });
 
-  it("parses menu category and manager commands", () => {
+  it("includes cooled products and bakery in Kristina report", () => {
+    const scoped = scopeSnapshot(snapshot(), { kind: "manager", manager: "kristina" });
+    expect(scoped?.categories.map((item) => item.category)).toEqual([
+      "Азиатская продукция",
+      "Охлажденная продукция",
+      "Хлебобулочные изделия"
+    ]);
+  });
+
+  it("parses menu, category and statistics commands", () => {
     expect(parseForecastCommand("Отчёт Влад")).toEqual({ kind: "report", scope: { kind: "manager", manager: "vlad" } });
     expect(parseForecastCommand("Категория Специи и выпечка")).toEqual({
       kind: "report",
       scope: { kind: "category", category: "Специи, компоненты для выпечки" }
+    });
+    expect(parseForecastCommand("Статистика Кристина")).toEqual({
+      kind: "history",
+      scope: { kind: "manager", manager: "kristina" }
+    });
+    expect(parseForecastCommand("Статистика категории Охлажденная продукция")).toEqual({
+      kind: "history",
+      scope: { kind: "category", category: "Охлажденная продукция" }
     });
   });
 });
