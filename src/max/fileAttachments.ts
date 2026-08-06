@@ -56,7 +56,7 @@ function isPrivateHostname(hostname: string): boolean {
 export async function downloadMaxFile(urlValue: string, maxBytes = 25 * 1024 * 1024): Promise<Buffer> {
   const url = new URL(urlValue);
   if (url.protocol !== "https:" || isPrivateHostname(url.hostname)) throw new Error("Unsafe MAX file URL");
-  const response = await fetch(url, { signal: AbortSignal.timeout(25_000) });
+  const response = await fetch(url, { signal: AbortSignal.timeout(55_000) });
   if (!response.ok) throw new Error(`MAX file download failed: ${response.status}`);
   const declared = Number(response.headers.get("content-length") ?? 0);
   if (declared > maxBytes) throw new Error("Файл слишком большой. Максимум 25 МБ.");
