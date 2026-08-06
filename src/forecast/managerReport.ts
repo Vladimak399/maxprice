@@ -1,6 +1,6 @@
 import type { ForecastResult } from "./types";
 import type { PeriodComparisonSummary, SalesAnalysisSummary, SalesItemCandidate, StoredSupportingReport } from "./supportingTypes";
-import { categoryMatchesScope, seasonalIsActive, scopeTitle, type ReportScope } from "./scopes";
+import { categoryMatchesScope, scopeTitle, type ReportScope } from "./scopes";
 
 function rub(value: number): string {
   return `${Math.round(value).toLocaleString("ru-RU")} ₽`;
@@ -113,14 +113,12 @@ export function formatScopedManagerReport(input: {
   if (actions.length) actions.forEach((action, index) => lines.push(`${index + 1}. ${action}`));
   else lines.push("• Критичных действий по загруженным данным не найдено.");
 
-  if (!seasonalIsActive(reportDate)) lines.push("", "Сезонный товар исключён из плана, рисков и рекомендаций до ноября.");
   if (comparisonSummary && comparisonSummary.reportDate !== reportDate) {
     lines.push(`⚠️ Сравнение актуально по ${comparisonSummary.reportDate.split("-").reverse().join(".")}, план-факт — по ${dateLabel}.`);
   }
   if (salesSummary && salesSummary.reportDate !== reportDate) {
     lines.push(`⚠️ Продажи с анализом актуальны по ${salesSummary.reportDate.split("-").reverse().join(".")}, план-факт — по ${dateLabel}.`);
   }
-  lines.push("Точные цены, min/max и перемещения не рассчитываются без отдельной выгрузки.");
   return lines.join("\n");
 }
 
