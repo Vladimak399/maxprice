@@ -78,7 +78,7 @@ export function parsePeriodComparisonWorkbook(buffer: Buffer, filename: string):
   if (periods.length < 2) throw new Error("Не найдены два сопоставимых периода в отчёте.");
   const currentPeriod = periods.at(-1)!;
   const previousPeriod = periods.at(-2)!;
-  const previousColumns = findMetricColumns(sheet, previousPeriod.col, currentPeriod.col);
+  const previousColumns = findMetricColumns(sheet, previousPeriod.col, Math.min(range.e.c + 1, previousPeriod.col + 5));
   const currentColumns = findMetricColumns(sheet, currentPeriod.col, Math.min(range.e.c + 1, currentPeriod.col + 5));
 
   let productRow = 0;
