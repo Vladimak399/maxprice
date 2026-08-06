@@ -1,4 +1,4 @@
-import handler from "../../../../src/handlers/maxWebhook";
+import handler from "../../../../src/handlers/forecastAwareMaxWebhook";
 import { adaptVercelHandler } from "../../../../src/server/vercelAdapter";
 
 export const runtime = "nodejs";
