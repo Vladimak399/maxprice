@@ -9,6 +9,21 @@ type RawLine = PlanFactLine & {
   hidden: boolean;
 };
 
+type PlanSegment = {
+  start: number;
+  end: number;
+  revenueCol: number;
+  marginCol: number;
+};
+
+type PlanFactLayout = {
+  totalPlanRevenueCol: number;
+  totalPlanMarginCol: number;
+  totalActualRevenueCol: number;
+  totalActualMarginCol: number;
+  segments: PlanSegment[];
+};
+
 function text(value: unknown): string {
   if (value === null || value === undefined) return "";
   return String(value).trim();
@@ -44,6 +59,10 @@ function cell(sheet: XLSX.WorkSheet, address: string): unknown {
   return sheet[address]?.v;
 }
 
+function cellAt(sheet: XLSX.WorkSheet, row: number, col: number): unknown {
+  return cell(sheet, XLSX.utils.encode_cell({ r: row - 1, c: col }));
+}
+
 function parseIsoDate(value: string): string | null {
   const match = value.match(/(\d{2})\.(\d{2})\.(\d{4})/);
   if (!match) return null;
@@ -64,28 +83,146 @@ function parseReportDate(filename: string, periodStart: string): string | null {
   return date.toISOString().slice(0, 10);
 }
 
-function proratedPlan(sheet: XLSX.WorkSheet, row: number, reportDay: number, periodEndDay: number, metric: "revenue" | "margin"): number {
-  const segments = [
-    { start: 1, end: 9, revenue: "E", margin: "F" },
-    { start: 10, end: 16, revenue: "N", margin: "O" },
-    { start: 17, end: 23, revenue: "W", margin: "X" },
-    { start: 24, end: 31, revenue: "AF", margin: "AG" }
-  ] as const;
+function normalizeLabel(value: string): string {
+  return value.toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();
+}
 
+function findTextColumn(
+  sheet: XLSX.WorkSheet,
+  row: number,
+  startCol: number,
+  endCol: number,
+  predicate: (value: string) => boolean
+): number | null {
+  for (let col = startCol; col <= endCol; col += 1) {
+    if (predicate(normalizeLabel(text(cellAt(sheet, row, col))))) return col;
+  }
+  return null;
+}
+
+function findMetricColumns(
+  sheet: XLSX.WorkSheet,
+  row: number,
+  startCol: number,
+  endCol: number
+): { revenueCol: number; marginCol: number } | null {
+  const revenueCol = findTextColumn(sheet, row, startCol, endCol, (value) => value === "выручка");
+  if (revenueCol === null) return null;
+  const marginCol = findTextColumn(sheet, row, revenueCol + 1, endCol, (value) => value === "вал");
+  if (marginCol === null) return null;
+  return { revenueCol, marginCol };
+}
+
+function detectLayout(sheet: XLSX.WorkSheet, range: XLSX.Range): PlanFactLayout {
+  const maxHeaderRow = Math.min(range.e.r + 1, 20);
+  let totalHeaderRow: number | null = null;
+  let totalStartCol: number | null = null;
+
+  for (let row = range.s.r + 1; row <= maxHeaderRow; row += 1) {
+    for (let col = range.s.c; col <= range.e.c; col += 1) {
+      if (normalizeLabel(text(cellAt(sheet, row, col))) === "итого") {
+        totalHeaderRow = row;
+        totalStartCol = col;
+      }
+    }
+  }
+
+  if (totalHeaderRow === null || totalStartCol === null) {
+    throw new Error("Не найден блок «Итого» в заголовке план-факта.");
+  }
+
+  let groupRow: number | null = null;
+  let planAnchorCol: number | null = null;
+  let factAnchorCol: number | null = null;
+  let deviationAnchorCol: number | null = null;
+
+  for (let row = totalHeaderRow; row <= Math.min(maxHeaderRow, totalHeaderRow + 4); row += 1) {
+    const planCol = findTextColumn(sheet, row, totalStartCol, range.e.c, (value) => value === "план");
+    const factCol = planCol === null ? null : findTextColumn(sheet, row, planCol + 1, range.e.c, (value) => value === "факт");
+    if (planCol === null || factCol === null) continue;
+    groupRow = row;
+    planAnchorCol = planCol;
+    factAnchorCol = factCol;
+    deviationAnchorCol = findTextColumn(sheet, row, factCol + 1, range.e.c, (value) => value.startsWith("отклонение") || value.startsWith("откл"));
+    break;
+  }
+
+  if (groupRow === null || planAnchorCol === null || factAnchorCol === null) {
+    throw new Error("Не найдены заголовки «План» и «Факт» в блоке «Итого».");
+  }
+
+  let metricRow: number | null = null;
+  let planMetrics: { revenueCol: number; marginCol: number } | null = null;
+  let actualMetrics: { revenueCol: number; marginCol: number } | null = null;
+  const actualEndCol = (deviationAnchorCol ?? (range.e.c + 1)) - 1;
+
+  for (let row = groupRow + 1; row <= Math.min(maxHeaderRow, groupRow + 3); row += 1) {
+    const plan = findMetricColumns(sheet, row, planAnchorCol, factAnchorCol - 1);
+    const actual = findMetricColumns(sheet, row, factAnchorCol, actualEndCol);
+    if (!plan || !actual) continue;
+    metricRow = row;
+    planMetrics = plan;
+    actualMetrics = actual;
+    break;
+  }
+
+  if (metricRow === null || !planMetrics || !actualMetrics) {
+    throw new Error("Не удалось определить колонки выручки и вала в блоке «Итого».");
+  }
+
+  const segmentHeaders: Array<{ start: number; end: number; col: number }> = [];
+  for (let col = range.s.c; col < totalStartCol; col += 1) {
+    const raw = text(cellAt(sheet, totalHeaderRow, col));
+    const match = raw.match(/^\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*$/);
+    if (!match) continue;
+    segmentHeaders.push({ start: Number(match[1]), end: Number(match[2]), col });
+  }
+
+  const segments: PlanSegment[] = [];
+  for (let index = 0; index < segmentHeaders.length; index += 1) {
+    const segment = segmentHeaders[index];
+    const endCol = (segmentHeaders[index + 1]?.col ?? totalStartCol) - 1;
+    const localPlanAnchor = findTextColumn(sheet, groupRow, segment.col, endCol, (value) => value === "план");
+    if (localPlanAnchor === null) continue;
+    const localFactAnchor = findTextColumn(sheet, groupRow, localPlanAnchor + 1, endCol, (value) => value === "факт");
+    const metricEndCol = (localFactAnchor ?? (endCol + 1)) - 1;
+    const metrics = findMetricColumns(sheet, metricRow, localPlanAnchor, metricEndCol);
+    if (!metrics) continue;
+    segments.push({ start: segment.start, end: segment.end, ...metrics });
+  }
+
+  if (!segments.length) {
+    throw new Error("Не удалось определить недельные плановые блоки в отчёте.");
+  }
+
+  return {
+    totalPlanRevenueCol: planMetrics.revenueCol,
+    totalPlanMarginCol: planMetrics.marginCol,
+    totalActualRevenueCol: actualMetrics.revenueCol,
+    totalActualMarginCol: actualMetrics.marginCol,
+    segments
+  };
+}
+
+function proratedPlan(
+  sheet: XLSX.WorkSheet,
+  row: number,
+  reportDay: number,
+  periodEndDay: number,
+  metric: "revenue" | "margin",
+  layout: PlanFactLayout
+): number {
   let result = 0;
-  for (const segment of segments) {
+  for (const segment of layout.segments) {
     const segmentEnd = Math.min(segment.end, periodEndDay);
     if (segmentEnd < segment.start || reportDay < segment.start) continue;
     const elapsed = Math.min(reportDay, segmentEnd) - segment.start + 1;
     const segmentDays = segmentEnd - segment.start + 1;
-    const value = number(cell(sheet, `${segment[metric]}${row}`)) ?? 0;
+    const col = metric === "revenue" ? segment.revenueCol : segment.marginCol;
+    const value = number(cellAt(sheet, row, col)) ?? 0;
     result += value * Math.max(0, Math.min(1, elapsed / segmentDays));
   }
   return result;
-}
-
-function normalizeLabel(value: string): string {
-  return value.toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();
 }
 
 export function parsePlanFactWorkbook(buffer: Buffer, filename: string): ParsedPlanFact {
@@ -109,6 +246,8 @@ export function parsePlanFactWorkbook(buffer: Buffer, filename: string): ParsedP
   const reportDate = parseReportDate(filename, periodStart);
   if (!reportDate) throw new Error("Не удалось определить дату отчёта из имени файла. Используйте формат вроде: факт 08.08.xlsx");
   if (reportDate < periodStart || reportDate > periodEnd) throw new Error("Дата отчёта из имени файла не входит в период книги.");
+
+  const layout = detectLayout(sheet, range);
   const reportDay = Number(reportDate.slice(8, 10));
   const periodEndDay = Number(periodEnd.slice(8, 10));
   const rows = (sheet["!rows"] ?? []) as RowInfo[];
@@ -116,10 +255,10 @@ export function parsePlanFactWorkbook(buffer: Buffer, filename: string): ParsedP
 
   for (let row = range.s.r + 1; row <= range.e.r + 1; row += 1) {
     const category = text(cell(sheet, `A${row}`));
-    const monthlyPlanRevenue = number(cell(sheet, `AO${row}`));
-    const monthlyPlanMargin = number(cell(sheet, `AP${row}`));
-    const actualRevenue = number(cell(sheet, `AR${row}`));
-    const actualMargin = number(cell(sheet, `AS${row}`));
+    const monthlyPlanRevenue = number(cellAt(sheet, row, layout.totalPlanRevenueCol));
+    const monthlyPlanMargin = number(cellAt(sheet, row, layout.totalPlanMarginCol));
+    const actualRevenue = number(cellAt(sheet, row, layout.totalActualRevenueCol));
+    const actualMargin = number(cellAt(sheet, row, layout.totalActualMarginCol));
     if (!category || monthlyPlanRevenue === null || monthlyPlanMargin === null || actualRevenue === null || actualMargin === null) continue;
     const rowInfo = rows[row - 1] ?? {};
     lines.push({
@@ -129,8 +268,8 @@ export function parsePlanFactWorkbook(buffer: Buffer, filename: string): ParsedP
       category,
       monthlyPlanRevenue,
       monthlyPlanMargin,
-      planToDateRevenue: proratedPlan(sheet, row, reportDay, periodEndDay, "revenue"),
-      planToDateMargin: proratedPlan(sheet, row, reportDay, periodEndDay, "margin"),
+      planToDateRevenue: proratedPlan(sheet, row, reportDay, periodEndDay, "revenue", layout),
+      planToDateMargin: proratedPlan(sheet, row, reportDay, periodEndDay, "margin", layout),
       actualRevenue,
       actualMargin
     });
