@@ -130,6 +130,8 @@ describe("parsePlanFactWorkbook", () => {
   it("parses the full-month layout and repairs the known SharedStrings path casing", () => {
     const parsed = parsePlanFactWorkbook(breakSharedStringsPathCase(workbookBuffer()), "факт 05.08.xlsx");
     expect(parsed.reportDate).toBe("2026-08-05");
+    expect(parsed.planHorizonEnd).toBe("2026-08-31");
+    expect(parsed.planIsFullMonth).toBe(true);
     expect(parsed.overall.planToDateRevenue).toBeCloseTo(500, 6);
     expect(parsed.overall.actualRevenue).toBe(480);
     expect(parsed.categories.map((item) => item.category)).toEqual([
@@ -139,13 +141,16 @@ describe("parsePlanFactWorkbook", () => {
     ]);
   });
 
-  it("parses a compact report whose total block ends at column V", () => {
+  it("prorates a 1-9 plan when fact is available only through the sixth day", () => {
     const parsed = parsePlanFactWorkbook(compactWorkbookBuffer(), "факт 06.08 (2).xlsx");
     expect(parsed.reportDate).toBe("2026-08-06");
     expect(parsed.periodEnd).toBe("2026-08-06");
+    expect(parsed.planHorizonEnd).toBe("2026-08-09");
+    expect(parsed.planIsFullMonth).toBe(false);
     expect(parsed.overall.monthlyPlanRevenue).toBe(600);
-    expect(parsed.overall.planToDateRevenue).toBe(600);
+    expect(parsed.overall.planToDateRevenue).toBeCloseTo(400, 6);
     expect(parsed.overall.actualRevenue).toBe(420);
+    expect(parsed.overall.actualRevenue / parsed.overall.planToDateRevenue).toBeCloseTo(1.05, 6);
     expect(parsed.categories.map((item) => item.category)).toEqual([
       "Бакалея",
       "Напитки",
