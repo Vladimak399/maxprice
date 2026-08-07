@@ -17,6 +17,9 @@ function addHeaders(sheet: XLSX.WorkSheet, compact = false): void {
   set(sheet, "I8", "Вал");
 
   if (compact) {
+    // Реальная сокращенная выгрузка может подписывать блок фактическим периодом 1-6,
+    // хотя план в нем относится к фиксированному плановому интервалу 1-9.
+    set(sheet, "E6", "1 - 6");
     set(sheet, "N6", "Итого");
     set(sheet, "N7", "План");
     set(sheet, "P7", "Факт");
@@ -141,7 +144,7 @@ describe("parsePlanFactWorkbook", () => {
     ]);
   });
 
-  it("prorates a 1-9 plan when fact is available only through the sixth day", () => {
+  it("prorates a shortened 1-6 block against the fixed 1-9 planning interval", () => {
     const parsed = parsePlanFactWorkbook(compactWorkbookBuffer(), "факт 06.08 (2).xlsx");
     expect(parsed.reportDate).toBe("2026-08-06");
     expect(parsed.periodEnd).toBe("2026-08-06");
