@@ -12,6 +12,8 @@ function snapshot(overrides: Partial<StoredPlanFactSnapshot> = {}): StoredPlanFa
     reportDate: "2026-08-05",
     periodStart: "2026-08-01",
     periodEnd: "2026-08-31",
+    planHorizonEnd: "2026-08-31",
+    planIsFullMonth: true,
     createdAt: "2026-08-05T08:00:00.000Z",
     overall: {
       category: "Продукты",
@@ -71,5 +73,37 @@ describe("buildForecast", () => {
     const result = buildForecast(snapshot(), previous, null);
     expect(result.recentDailyRevenue).toBeCloseTo(100, 4);
     expect(result.forecastRevenueRatio).toBeGreaterThan(0.98);
+  });
+
+  it("uses the end of the available plan block instead of month end", () => {
+    const compact = snapshot({
+      filename: "факт 06.08 (2).xlsx",
+      reportDate: "2026-08-06",
+      periodEnd: "2026-08-06",
+      planHorizonEnd: "2026-08-09",
+      planIsFullMonth: false,
+      overall: {
+        category: "Продукты",
+        monthlyPlanRevenue: 600,
+        monthlyPlanMargin: 180,
+        planToDateRevenue: 400,
+        planToDateMargin: 120,
+        actualRevenue: 420,
+        actualMargin: 127
+      },
+      categories: [{
+        category: "Бакалея",
+        monthlyPlanRevenue: 600,
+        monthlyPlanMargin: 180,
+        planToDateRevenue: 400,
+        planToDateMargin: 120,
+        actualRevenue: 420,
+        actualMargin: 127
+      }]
+    });
+    const result = buildForecast(compact, null, null);
+    expect(result.planToDateRatio).toBeCloseTo(1.05, 6);
+    expect(result.requiredDailyRevenue).toBeCloseTo(60, 6);
+    expect(result.forecastRevenueRatio).toBeGreaterThan(1);
   });
 });

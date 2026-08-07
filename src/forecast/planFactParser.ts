@@ -21,6 +21,7 @@ type PlanFactLayout = {
   totalPlanMarginCol: number;
   totalActualRevenueCol: number;
   totalActualMarginCol: number;
+  planHorizonEndDay: number;
   segments: PlanSegment[];
 };
 
@@ -81,6 +82,18 @@ function parseReportDate(filename: string, periodStart: string): string | null {
   const date = new Date(Date.UTC(parsedYear, month - 1, day));
   if (date.getUTCFullYear() !== parsedYear || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
   return date.toISOString().slice(0, 10);
+}
+
+function daysInMonth(date: string): number {
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function dateWithDay(date: string, day: number): string {
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
 }
 
 function normalizeLabel(value: string): string {
@@ -200,6 +213,7 @@ function detectLayout(sheet: XLSX.WorkSheet, range: XLSX.Range): PlanFactLayout 
     totalPlanMarginCol: planMetrics.marginCol,
     totalActualRevenueCol: actualMetrics.revenueCol,
     totalActualMarginCol: actualMetrics.marginCol,
+    planHorizonEndDay: Math.max(...segments.map((segment) => segment.end)),
     segments
   };
 }
@@ -208,16 +222,14 @@ function proratedPlan(
   sheet: XLSX.WorkSheet,
   row: number,
   reportDay: number,
-  periodEndDay: number,
   metric: "revenue" | "margin",
   layout: PlanFactLayout
 ): number {
   let result = 0;
   for (const segment of layout.segments) {
-    const segmentEnd = Math.min(segment.end, periodEndDay);
-    if (segmentEnd < segment.start || reportDay < segment.start) continue;
-    const elapsed = Math.min(reportDay, segmentEnd) - segment.start + 1;
-    const segmentDays = segmentEnd - segment.start + 1;
+    if (reportDay < segment.start) continue;
+    const elapsed = Math.min(reportDay, segment.end) - segment.start + 1;
+    const segmentDays = segment.end - segment.start + 1;
     const col = metric === "revenue" ? segment.revenueCol : segment.marginCol;
     const value = number(cellAt(sheet, row, col)) ?? 0;
     result += value * Math.max(0, Math.min(1, elapsed / segmentDays));
@@ -249,7 +261,9 @@ export function parsePlanFactWorkbook(buffer: Buffer, filename: string): ParsedP
 
   const layout = detectLayout(sheet, range);
   const reportDay = Number(reportDate.slice(8, 10));
-  const periodEndDay = Number(periodEnd.slice(8, 10));
+  const monthDays = daysInMonth(reportDate);
+  const horizonDay = Math.min(layout.planHorizonEndDay, monthDays);
+  const planHorizonEnd = dateWithDay(reportDate, horizonDay);
   const rows = (sheet["!rows"] ?? []) as RowInfo[];
   const lines: RawLine[] = [];
 
@@ -268,8 +282,8 @@ export function parsePlanFactWorkbook(buffer: Buffer, filename: string): ParsedP
       category,
       monthlyPlanRevenue,
       monthlyPlanMargin,
-      planToDateRevenue: proratedPlan(sheet, row, reportDay, periodEndDay, "revenue", layout),
-      planToDateMargin: proratedPlan(sheet, row, reportDay, periodEndDay, "margin", layout),
+      planToDateRevenue: proratedPlan(sheet, row, reportDay, "revenue", layout),
+      planToDateMargin: proratedPlan(sheet, row, reportDay, "margin", layout),
       actualRevenue,
       actualMargin
     });
@@ -299,6 +313,8 @@ export function parsePlanFactWorkbook(buffer: Buffer, filename: string): ParsedP
     reportDate,
     periodStart,
     periodEnd,
+    planHorizonEnd,
+    planIsFullMonth: horizonDay === monthDays,
     overall: overallLine,
     categories: parsedCategories
   };

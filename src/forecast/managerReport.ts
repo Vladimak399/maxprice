@@ -18,6 +18,10 @@ function shortName(value: string, limit = 72): string {
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
 }
 
+function dateLabel(value: string): string {
+  return value.split("-").reverse().join(".");
+}
+
 function comparison(report: StoredSupportingReport | null): PeriodComparisonSummary | null {
   return report?.summary.type === "period_comparison" ? report.summary : null;
 }
@@ -77,7 +81,10 @@ export function formatScopedManagerReport(input: {
   const comparisonSummary = comparison(input.comparisonReport);
   const salesSummary = sales(input.salesReport);
   const reportDate = input.result.snapshot.reportDate;
-  const dateLabel = reportDate.split("-").reverse().join(".");
+  const currentDateLabel = dateLabel(reportDate);
+  const horizonLabel = dateLabel(input.result.snapshot.planHorizonEnd);
+  const forecastLabel = input.result.snapshot.planIsFullMonth ? "Прогноз месяца" : `Прогноз к ${horizonLabel}`;
+  const tempoLabel = input.result.snapshot.planIsFullMonth ? "Нужно до конца месяца" : `Нужно до ${horizonLabel}`;
   const categories = [...input.result.categories].sort((a, b) => a.forecastRevenueRatio - b.forecastRevenueRatio);
   const declining = comparisonSummary?.subcategories
     .filter((item) => item.parentCategory && categoryMatchesScope(item.parentCategory, input.scope, reportDate) && item.revenueDelta < 0)
@@ -86,14 +93,14 @@ export function formatScopedManagerReport(input: {
   const actions = actionLines({ scope: input.scope, reportDate, comparison: comparisonSummary, sales: salesSummary });
   const lines = [
     `📊 ${scopeTitle(input.scope).toUpperCase()}`,
-    `Данные продаж: по ${dateLabel}`,
+    `Данные продаж: по ${currentDateLabel}`,
     "",
     `Факт: ${rub(input.result.snapshot.overall.actualRevenue)}`,
     `План на дату: ${rub(input.result.snapshot.overall.planToDateRevenue)}`,
     `Выполнение: ${percent(input.result.planToDateRatio)}`,
-    `Прогноз месяца: ${percent(input.result.forecastRevenueRatio)}`,
+    `${forecastLabel}: ${percent(input.result.forecastRevenueRatio)}`,
     `Прогноз по валу: ${percent(input.result.forecastMarginRatio)}`,
-    `Нужно до конца месяца: ${rub(input.result.requiredDailyRevenue)} в день`,
+    `${tempoLabel}: ${rub(input.result.requiredDailyRevenue)} в день`,
     "",
     input.scope.kind === "category" ? "Подкатегории с наибольшей потерей:" : "Категории:"
   ];
@@ -114,10 +121,10 @@ export function formatScopedManagerReport(input: {
   else lines.push("• Критичных действий по загруженным данным не найдено.");
 
   if (comparisonSummary && comparisonSummary.reportDate !== reportDate) {
-    lines.push(`⚠️ Сравнение актуально по ${comparisonSummary.reportDate.split("-").reverse().join(".")}, план-факт — по ${dateLabel}.`);
+    lines.push(`⚠️ Сравнение актуально по ${dateLabel(comparisonSummary.reportDate)}, план-факт — по ${currentDateLabel}.`);
   }
   if (salesSummary && salesSummary.reportDate !== reportDate) {
-    lines.push(`⚠️ Продажи с анализом актуальны по ${salesSummary.reportDate.split("-").reverse().join(".")}, план-факт — по ${dateLabel}.`);
+    lines.push(`⚠️ Продажи с анализом актуальны по ${dateLabel(salesSummary.reportDate)}, план-факт — по ${currentDateLabel}.`);
   }
   return lines.join("\n");
 }

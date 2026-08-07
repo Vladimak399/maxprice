@@ -15,12 +15,6 @@ function daysBetween(left: string, right: string): number {
   return Math.max(0, Math.round((b - a) / 86_400_000));
 }
 
-function daysInMonth(date: string): number {
-  const year = Number(date.slice(0, 4));
-  const month = Number(date.slice(5, 7));
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
 function lineByCategory(snapshot: StoredPlanFactSnapshot | null, category: string) {
   return snapshot?.categories.find((item) => item.category === category) ?? null;
 }
@@ -34,14 +28,14 @@ function momentum(currentActual: number, currentPlanToDate: number, previousActu
   return clamp(0.2 + currentRatio * 0.25 + recentRatio * 0.55, 0.75, 1.25);
 }
 
-function computeCategory(current: StoredPlanFactSnapshot["categories"][number], previous: StoredPlanFactSnapshot["categories"][number] | null, weather: WeatherSummary | null, remainingDays: number, totalDays: number): CategoryForecast {
+function computeCategory(current: StoredPlanFactSnapshot["categories"][number], previous: StoredPlanFactSnapshot["categories"][number] | null, weather: WeatherSummary | null, remainingDays: number, coverageDays: number): CategoryForecast {
   const revenueMomentum = momentum(current.actualRevenue, current.planToDateRevenue, previous?.actualRevenue ?? null, previous?.planToDateRevenue ?? null);
   const marginMomentum = momentum(current.actualMargin, current.planToDateMargin, previous?.actualMargin ?? null, previous?.planToDateMargin ?? null);
   const remainingPlanRevenue = Math.max(0, current.monthlyPlanRevenue - current.planToDateRevenue);
   const remainingPlanMargin = Math.max(0, current.monthlyPlanMargin - current.planToDateMargin);
   const weatherFactor = categoryWeatherFactor(current.category, weather);
   const weatherWindowDays = Math.min(7, remainingDays);
-  const weatherImpactRevenue = current.monthlyPlanRevenue * (weatherWindowDays / totalDays) * weatherFactor;
+  const weatherImpactRevenue = current.monthlyPlanRevenue * (weatherWindowDays / Math.max(1, coverageDays)) * weatherFactor;
   const forecastRevenue = Math.max(current.actualRevenue, current.actualRevenue + remainingPlanRevenue * revenueMomentum + weatherImpactRevenue);
   const forecastMargin = Math.max(current.actualMargin, current.actualMargin + remainingPlanMargin * marginMomentum);
   return {
@@ -55,12 +49,13 @@ function computeCategory(current: StoredPlanFactSnapshot["categories"][number], 
 }
 
 export function buildForecast(snapshot: StoredPlanFactSnapshot, previousSnapshot: StoredPlanFactSnapshot | null, weather: WeatherSummary | null, previousForecastRevenueRatio: number | null = null): ForecastResult {
-  const totalDays = daysInMonth(snapshot.reportDate);
   const reportDay = Number(snapshot.reportDate.slice(8, 10));
-  const remainingDays = Math.max(0, totalDays - reportDay);
-  const categories = snapshot.categories.map((category) => computeCategory(category, lineByCategory(previousSnapshot, category.category), weather, remainingDays, totalDays));
+  const horizonDay = Number(snapshot.planHorizonEnd.slice(8, 10));
+  const coverageDays = Math.max(1, horizonDay);
+  const remainingDays = daysBetween(snapshot.reportDate, snapshot.planHorizonEnd);
+  const categories = snapshot.categories.map((category) => computeCategory(category, lineByCategory(previousSnapshot, category.category), weather, remainingDays, coverageDays));
   const categoryPlan = categories.reduce((sum, item) => sum + item.monthlyPlanRevenue, 0);
-  const useCategorySum = categoryPlan > 0 && Math.abs(categoryPlan - snapshot.overall.monthlyPlanRevenue) / snapshot.overall.monthlyPlanRevenue < 0.05;
+  const useCategorySum = categoryPlan > 0 && snapshot.overall.monthlyPlanRevenue > 0 && Math.abs(categoryPlan - snapshot.overall.monthlyPlanRevenue) / snapshot.overall.monthlyPlanRevenue < 0.05;
 
   let forecastRevenue = categories.reduce((sum, item) => sum + item.forecastRevenue, 0);
   let forecastMargin = categories.reduce((sum, item) => sum + item.forecastMargin, 0);

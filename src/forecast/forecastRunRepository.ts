@@ -4,7 +4,7 @@ import { scopeTitle } from "./scopes";
 import type { ForecastResult } from "./types";
 import { ANALYTICS_WORKSPACE_ID } from "./workspace";
 
-export const FORECAST_ALGORITHM_VERSION = "2026-08-v1";
+export const FORECAST_ALGORITHM_VERSION = "2026-08-v2";
 
 export type ForecastRunCategory = {
   category: string;
@@ -21,6 +21,8 @@ export type StoredForecastRun = {
   scopeKey: string;
   scopeTitle: string;
   reportDate: string;
+  planHorizonEnd: string;
+  planIsFullMonth: boolean;
   algorithmVersion: string;
   trigger: string;
   calculatedAt: string;
@@ -82,6 +84,8 @@ async function createSchema(): Promise<void> {
     scope_key text NOT NULL,
     scope_title text NOT NULL,
     report_date date NOT NULL,
+    plan_horizon_end date,
+    plan_is_full_month boolean,
     algorithm_version text NOT NULL,
     trigger text NOT NULL,
     actual_revenue numeric NOT NULL,
@@ -100,6 +104,12 @@ async function createSchema(): Promise<void> {
     calculated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE(workspace_id, scope_type, scope_key, report_date, algorithm_version)
   )`;
+  await sql`ALTER TABLE forecast_runs ADD COLUMN IF NOT EXISTS plan_horizon_end date`;
+  await sql`ALTER TABLE forecast_runs ADD COLUMN IF NOT EXISTS plan_is_full_month boolean`;
+  await sql`UPDATE forecast_runs SET plan_horizon_end=report_date WHERE plan_horizon_end IS NULL`;
+  await sql`UPDATE forecast_runs SET plan_is_full_month=false WHERE plan_is_full_month IS NULL`;
+  await sql`ALTER TABLE forecast_runs ALTER COLUMN plan_horizon_end SET NOT NULL`;
+  await sql`ALTER TABLE forecast_runs ALTER COLUMN plan_is_full_month SET NOT NULL`;
   await sql`CREATE INDEX IF NOT EXISTS forecast_runs_workspace_scope_date_idx
     ON forecast_runs(workspace_id, scope_type, scope_key, report_date DESC, calculated_at DESC)`;
 }
@@ -133,6 +143,8 @@ export async function saveForecastRun(input: {
     scopeKey: identity.key,
     scopeTitle: identity.title,
     reportDate: input.result.snapshot.reportDate,
+    planHorizonEnd: input.result.snapshot.planHorizonEnd,
+    planIsFullMonth: input.result.snapshot.planIsFullMonth,
     algorithmVersion: FORECAST_ALGORITHM_VERSION,
     trigger: input.trigger,
     actualRevenue: input.result.snapshot.overall.actualRevenue,
@@ -151,13 +163,13 @@ export async function saveForecastRun(input: {
 
   const rows = input.replace
     ? await sql`INSERT INTO forecast_runs (
-        workspace_id, source_user_id, scope_type, scope_key, scope_title, report_date,
+        workspace_id, source_user_id, scope_type, scope_key, scope_title, report_date, plan_horizon_end, plan_is_full_month,
         algorithm_version, trigger, actual_revenue, monthly_plan_revenue, plan_to_date_revenue,
         forecast_revenue, forecast_margin, forecast_revenue_ratio, forecast_margin_ratio,
         plan_to_date_ratio, month_completion_ratio, required_daily_revenue, recent_daily_revenue,
         weather_impact_revenue, categories
       ) VALUES (
-        ${values.workspaceId}, ${values.sourceUserId}, ${values.scopeType}, ${values.scopeKey}, ${values.scopeTitle}, ${values.reportDate},
+        ${values.workspaceId}, ${values.sourceUserId}, ${values.scopeType}, ${values.scopeKey}, ${values.scopeTitle}, ${values.reportDate}, ${values.planHorizonEnd}, ${values.planIsFullMonth},
         ${values.algorithmVersion}, ${values.trigger}, ${values.actualRevenue}, ${values.monthlyPlanRevenue}, ${values.planToDateRevenue},
         ${values.forecastRevenue}, ${values.forecastMargin}, ${values.forecastRevenueRatio}, ${values.forecastMarginRatio},
         ${values.planToDateRatio}, ${values.monthCompletionRatio}, ${values.requiredDailyRevenue}, ${values.recentDailyRevenue},
@@ -165,6 +177,8 @@ export async function saveForecastRun(input: {
       ) ON CONFLICT (workspace_id, scope_type, scope_key, report_date, algorithm_version) DO UPDATE SET
         source_user_id=EXCLUDED.source_user_id,
         scope_title=EXCLUDED.scope_title,
+        plan_horizon_end=EXCLUDED.plan_horizon_end,
+        plan_is_full_month=EXCLUDED.plan_is_full_month,
         trigger=EXCLUDED.trigger,
         actual_revenue=EXCLUDED.actual_revenue,
         monthly_plan_revenue=EXCLUDED.monthly_plan_revenue,
@@ -182,13 +196,13 @@ export async function saveForecastRun(input: {
         calculated_at=now()
       RETURNING id` as Array<{ id: number | string }>
     : await sql`INSERT INTO forecast_runs (
-        workspace_id, source_user_id, scope_type, scope_key, scope_title, report_date,
+        workspace_id, source_user_id, scope_type, scope_key, scope_title, report_date, plan_horizon_end, plan_is_full_month,
         algorithm_version, trigger, actual_revenue, monthly_plan_revenue, plan_to_date_revenue,
         forecast_revenue, forecast_margin, forecast_revenue_ratio, forecast_margin_ratio,
         plan_to_date_ratio, month_completion_ratio, required_daily_revenue, recent_daily_revenue,
         weather_impact_revenue, categories
       ) VALUES (
-        ${values.workspaceId}, ${values.sourceUserId}, ${values.scopeType}, ${values.scopeKey}, ${values.scopeTitle}, ${values.reportDate},
+        ${values.workspaceId}, ${values.sourceUserId}, ${values.scopeType}, ${values.scopeKey}, ${values.scopeTitle}, ${values.reportDate}, ${values.planHorizonEnd}, ${values.planIsFullMonth},
         ${values.algorithmVersion}, ${values.trigger}, ${values.actualRevenue}, ${values.monthlyPlanRevenue}, ${values.planToDateRevenue},
         ${values.forecastRevenue}, ${values.forecastMargin}, ${values.forecastRevenueRatio}, ${values.forecastMarginRatio},
         ${values.planToDateRatio}, ${values.monthCompletionRatio}, ${values.requiredDailyRevenue}, ${values.recentDailyRevenue},
@@ -209,6 +223,8 @@ function parseRun(row: Record<string, unknown>): StoredForecastRun {
     scopeKey: String(row.scope_key),
     scopeTitle: String(row.scope_title),
     reportDate: isoDate(row.report_date),
+    planHorizonEnd: isoDate(row.plan_horizon_end),
+    planIsFullMonth: row.plan_is_full_month === true,
     algorithmVersion: String(row.algorithm_version),
     trigger: String(row.trigger),
     calculatedAt: isoTimestamp(row.calculated_at),
@@ -236,6 +252,7 @@ export async function listForecastRuns(scope: ReportScope, limit = 120): Promise
     WHERE workspace_id=${ANALYTICS_WORKSPACE_ID}
       AND scope_type=${identity.type}
       AND scope_key=${identity.key}
+      AND algorithm_version=${FORECAST_ALGORITHM_VERSION}
     ORDER BY report_date DESC, calculated_at DESC
     LIMIT ${limit}` as Array<Record<string, unknown>>;
   return rows.map(parseRun);

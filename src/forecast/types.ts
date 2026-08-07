@@ -13,6 +13,8 @@ export type ParsedPlanFact = {
   reportDate: string;
   periodStart: string;
   periodEnd: string;
+  planHorizonEnd: string;
+  planIsFullMonth: boolean;
   overall: PlanFactLine;
   categories: PlanFactLine[];
 };
