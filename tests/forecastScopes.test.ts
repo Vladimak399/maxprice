@@ -52,6 +52,30 @@ describe("forecast report scopes", () => {
     expect(scoped?.overall.actualRevenue).toBe(770);
   });
 
+  it("restores the 1-9 planning horizon when a compact report ends on day 6", () => {
+    const compact = snapshot("2026-08-06");
+    compact.periodEnd = "2026-08-06";
+    compact.planHorizonEnd = "2026-08-06";
+    compact.planIsFullMonth = false;
+    compact.categories = [
+      {
+        category: "Бакалея",
+        monthlyPlanRevenue: 9_000_000,
+        monthlyPlanMargin: 2_700_000,
+        planToDateRevenue: 9_000_000,
+        planToDateMargin: 2_700_000,
+        actualRevenue: 5_400_000,
+        actualMargin: 1_650_000
+      }
+    ];
+    compact.overall = { ...compact.categories[0], category: "Продукты" };
+
+    const scoped = scopeSnapshot(compact, { kind: "overall" });
+    expect(scoped?.planHorizonEnd).toBe("2026-08-09");
+    expect(scoped?.overall.planToDateRevenue).toBeCloseTo(6_000_000, 6);
+    expect((scoped?.overall.actualRevenue ?? 0) / (scoped?.overall.planToDateRevenue ?? 1)).toBeCloseTo(0.9, 6);
+  });
+
   it("keeps seasonal goods in the New Year period", () => {
     const scoped = scopeSnapshot(snapshot("2026-12-08"), { kind: "overall" });
     expect(scoped?.categories.map((item) => item.category)).toContain("Сезонный товар");
