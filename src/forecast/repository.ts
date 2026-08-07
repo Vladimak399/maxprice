@@ -32,6 +32,8 @@ async function createSchema(): Promise<void> {
     report_date date NOT NULL,
     period_start date NOT NULL,
     period_end date NOT NULL,
+    plan_horizon_end date,
+    plan_is_full_month boolean,
     plan_revenue numeric NOT NULL,
     plan_margin numeric NOT NULL,
     plan_to_date_revenue numeric NOT NULL,
@@ -41,8 +43,14 @@ async function createSchema(): Promise<void> {
     created_at timestamptz NOT NULL DEFAULT now()
   )`;
   await sql`ALTER TABLE forecast_snapshots ADD COLUMN IF NOT EXISTS workspace_id text`;
+  await sql`ALTER TABLE forecast_snapshots ADD COLUMN IF NOT EXISTS plan_horizon_end date`;
+  await sql`ALTER TABLE forecast_snapshots ADD COLUMN IF NOT EXISTS plan_is_full_month boolean`;
   await sql`UPDATE forecast_snapshots SET workspace_id=${ANALYTICS_WORKSPACE_ID}
     WHERE workspace_id IS NULL OR workspace_id=''`;
+  await sql`UPDATE forecast_snapshots SET plan_horizon_end=period_end
+    WHERE plan_horizon_end IS NULL`;
+  await sql`UPDATE forecast_snapshots SET plan_is_full_month=(plan_horizon_end = (date_trunc('month', plan_horizon_end) + interval '1 month - 1 day')::date)
+    WHERE plan_is_full_month IS NULL`;
   await sql`DELETE FROM forecast_snapshots WHERE id IN (
     SELECT id FROM (
       SELECT id, row_number() OVER (PARTITION BY workspace_id, report_date ORDER BY created_at DESC, id DESC) AS row_number
@@ -51,6 +59,8 @@ async function createSchema(): Promise<void> {
   )`;
   await sql`UPDATE forecast_snapshots SET dedupe_key=workspace_id || ':' || report_date::text`;
   await sql`ALTER TABLE forecast_snapshots ALTER COLUMN workspace_id SET NOT NULL`;
+  await sql`ALTER TABLE forecast_snapshots ALTER COLUMN plan_horizon_end SET NOT NULL`;
+  await sql`ALTER TABLE forecast_snapshots ALTER COLUMN plan_is_full_month SET NOT NULL`;
   await sql`DROP INDEX IF EXISTS forecast_snapshots_user_report_date_idx`;
   await sql`CREATE INDEX IF NOT EXISTS forecast_snapshots_workspace_date_idx
     ON forecast_snapshots(workspace_id, report_date DESC, created_at DESC)`;
@@ -86,14 +96,17 @@ export async function savePlanFactSnapshot(input: {
   const dedupeKey = `${ANALYTICS_WORKSPACE_ID}:${parsed.reportDate}`;
   const rows = await sql`INSERT INTO forecast_snapshots (
     dedupe_key, workspace_id, source_user_id, source_chat_id, message_id, filename, report_date, period_start, period_end,
+    plan_horizon_end, plan_is_full_month,
     plan_revenue, plan_margin, plan_to_date_revenue, plan_to_date_margin, actual_revenue, actual_margin
   ) VALUES (
     ${dedupeKey}, ${ANALYTICS_WORKSPACE_ID}, ${input.sourceUserId}, ${input.sourceChatId}, ${input.messageId}, ${parsed.filename}, ${parsed.reportDate}, ${parsed.periodStart}, ${parsed.periodEnd},
+    ${parsed.planHorizonEnd}, ${parsed.planIsFullMonth},
     ${parsed.overall.monthlyPlanRevenue}, ${parsed.overall.monthlyPlanMargin}, ${parsed.overall.planToDateRevenue}, ${parsed.overall.planToDateMargin}, ${parsed.overall.actualRevenue}, ${parsed.overall.actualMargin}
   ) ON CONFLICT (dedupe_key) DO UPDATE SET
     source_user_id=EXCLUDED.source_user_id, source_chat_id=EXCLUDED.source_chat_id,
     message_id=EXCLUDED.message_id, filename=EXCLUDED.filename,
     report_date=EXCLUDED.report_date, period_start=EXCLUDED.period_start, period_end=EXCLUDED.period_end,
+    plan_horizon_end=EXCLUDED.plan_horizon_end, plan_is_full_month=EXCLUDED.plan_is_full_month,
     plan_revenue=EXCLUDED.plan_revenue, plan_margin=EXCLUDED.plan_margin,
     plan_to_date_revenue=EXCLUDED.plan_to_date_revenue, plan_to_date_margin=EXCLUDED.plan_to_date_margin,
     actual_revenue=EXCLUDED.actual_revenue, actual_margin=EXCLUDED.actual_margin,
@@ -144,6 +157,8 @@ export async function listLatestPlanFactSnapshots(_viewerUserId: string, limit =
       reportDate: isoDate(raw.report_date),
       periodStart: isoDate(raw.period_start),
       periodEnd: isoDate(raw.period_end),
+      planHorizonEnd: isoDate(raw.plan_horizon_end),
+      planIsFullMonth: raw.plan_is_full_month === true,
       overall: {
         category: "Продукты",
         monthlyPlanRevenue: numeric(raw.plan_revenue),
