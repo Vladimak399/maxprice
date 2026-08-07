@@ -252,7 +252,6 @@ export async function listForecastRuns(scope: ReportScope, limit = 120): Promise
     WHERE workspace_id=${ANALYTICS_WORKSPACE_ID}
       AND scope_type=${identity.type}
       AND scope_key=${identity.key}
-      AND algorithm_version=${FORECAST_ALGORITHM_VERSION}
     ORDER BY report_date DESC, calculated_at DESC
     LIMIT ${limit}` as Array<Record<string, unknown>>;
   return rows.map(parseRun);
