@@ -4,7 +4,7 @@ import { scopeTitle } from "./scopes";
 import type { ForecastResult } from "./types";
 import { ANALYTICS_WORKSPACE_ID } from "./workspace";
 
-export const FORECAST_ALGORITHM_VERSION = "2026-08-v2";
+export const FORECAST_ALGORITHM_VERSION = "2026-08-v3";
 
 export type ForecastRunCategory = {
   category: string;
