@@ -82,14 +82,50 @@ function sum<T>(items: T[], selector: (item: T) => number): number {
   return items.reduce((total, item) => total + selector(item), 0);
 }
 
-export function scopeSnapshot(snapshot: StoredPlanFactSnapshot, scope: ReportScope): StoredPlanFactSnapshot | null {
-  const names = scopeCategories(scope, snapshot.categories.map((item) => item.category), snapshot.reportDate);
-  const nameSet = new Set(names.map(normalizeCategory));
-  const categories = snapshot.categories.filter((item) => nameSet.has(normalizeCategory(item.category)));
-  if (!categories.length) return null;
+function dateWithDay(date: string, day: number): string {
+  return `${date.slice(0, 8)}${String(day).padStart(2, "0")}`;
+}
+
+function normalizeEarlyMonthPlan(snapshot: StoredPlanFactSnapshot): StoredPlanFactSnapshot {
+  const reportDay = Number(snapshot.reportDate.slice(8, 10));
+  const horizonDay = Number(snapshot.planHorizonEnd.slice(8, 10));
+
+  // В 1С первый плановый интервал месяца — 1–9. В сокращенной выгрузке
+  // заголовок/период может заканчиваться текущей датой (например 1–6),
+  // хотя значения плана относятся ко всему интервалу 1–9.
+  if (snapshot.planIsFullMonth || reportDay < 1 || reportDay >= 9 || horizonDay !== reportDay) {
+    return snapshot;
+  }
+
+  const factor = reportDay / 9;
+  const categories = snapshot.categories.map((item) => ({
+    ...item,
+    planToDateRevenue: item.monthlyPlanRevenue * factor,
+    planToDateMargin: item.monthlyPlanMargin * factor
+  }));
 
   return {
     ...snapshot,
+    planHorizonEnd: dateWithDay(snapshot.reportDate, 9),
+    planIsFullMonth: false,
+    overall: {
+      ...snapshot.overall,
+      planToDateRevenue: snapshot.overall.monthlyPlanRevenue * factor,
+      planToDateMargin: snapshot.overall.monthlyPlanMargin * factor
+    },
+    categories
+  };
+}
+
+export function scopeSnapshot(snapshot: StoredPlanFactSnapshot, scope: ReportScope): StoredPlanFactSnapshot | null {
+  const normalizedSnapshot = normalizeEarlyMonthPlan(snapshot);
+  const names = scopeCategories(scope, normalizedSnapshot.categories.map((item) => item.category), normalizedSnapshot.reportDate);
+  const nameSet = new Set(names.map(normalizeCategory));
+  const categories = normalizedSnapshot.categories.filter((item) => nameSet.has(normalizeCategory(item.category)));
+  if (!categories.length) return null;
+
+  return {
+    ...normalizedSnapshot,
     overall: {
       category: scopeTitle(scope),
       monthlyPlanRevenue: sum(categories, (item) => item.monthlyPlanRevenue),
