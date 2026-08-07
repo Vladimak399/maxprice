@@ -23,6 +23,11 @@ function dateLabel(value: string): string {
   return value.split("-").reverse().join(".");
 }
 
+function comparableForecastChange(result: ForecastResult): number | null {
+  if (!result.previousSnapshot || result.previousSnapshot.planHorizonEnd !== result.snapshot.planHorizonEnd) return null;
+  return result.previousForecastRevenueRatio === null ? null : result.forecastRevenueRatio - result.previousForecastRevenueRatio;
+}
+
 function categoryLine(category: ForecastResult["categories"][number]): string {
   const marker = category.forecastRevenueRatio >= 1.02 ? "🟢" : category.forecastRevenueRatio >= 0.98 ? "🟡" : "🔴";
   return `${marker} ${category.category}: ${percent(category.forecastRevenueRatio)}`;
@@ -31,7 +36,7 @@ function categoryLine(category: ForecastResult["categories"][number]): string {
 export function formatPlan(result: ForecastResult): string {
   const risks = [...result.categories].sort((a, b) => a.forecastRevenueRatio - b.forecastRevenueRatio).slice(0, 3);
   const opportunities = [...result.categories].sort((a, b) => b.forecastRevenueRatio - a.forecastRevenueRatio).slice(0, 2);
-  const forecastChange = result.previousForecastRevenueRatio === null ? null : result.forecastRevenueRatio - result.previousForecastRevenueRatio;
+  const forecastChange = comparableForecastChange(result);
   const weatherPp = result.snapshot.overall.monthlyPlanRevenue > 0 ? result.weatherImpactRevenue / result.snapshot.overall.monthlyPlanRevenue : 0;
   const horizonLabel = dateLabel(result.snapshot.planHorizonEnd);
   const forecastTitle = result.snapshot.planIsFullMonth ? "Прогноз месяца" : `Прогноз к ${horizonLabel}`;
@@ -87,7 +92,7 @@ export function formatDataStatus(snapshots: StoredPlanFactSnapshot[]): string {
 }
 
 export function formatUploadSuccess(result: ForecastResult, filename: string): string {
-  const change = result.previousForecastRevenueRatio === null ? null : result.forecastRevenueRatio - result.previousForecastRevenueRatio;
+  const change = comparableForecastChange(result);
   const horizonLabel = dateLabel(result.snapshot.planHorizonEnd);
   const forecastLabel = result.snapshot.planIsFullMonth ? "Прогноз месяца" : `Прогноз к ${horizonLabel}`;
   return [
