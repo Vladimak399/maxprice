@@ -25,6 +25,8 @@ function snapshot(reportDate = "2026-08-08"): StoredPlanFactSnapshot {
     line("Хлебобулочные изделия", 300, 80),
     line("Сезонный товар", 800, 0)
   ];
+  const month = reportDate.slice(0, 7);
+  const monthEnd = reportDate.slice(5, 7) === "02" ? `${month}-28` : `${month}-31`;
   return {
     id: 1,
     sourceUserId: "user",
@@ -33,7 +35,9 @@ function snapshot(reportDate = "2026-08-08"): StoredPlanFactSnapshot {
     filename: "факт 08.08.xlsx",
     reportDate,
     periodStart: reportDate.slice(0, 8) + "01",
-    periodEnd: reportDate.slice(0, 8) + "31",
+    periodEnd: monthEnd,
+    planHorizonEnd: monthEnd,
+    planIsFullMonth: true,
     createdAt: "2026-08-08T08:00:00Z",
     overall: line("Продукты", 4500, 770),
     categories
