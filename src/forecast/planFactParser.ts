@@ -100,6 +100,19 @@ function normalizeLabel(value: string): string {
   return value.toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();
 }
 
+function canonicalPlanSegmentEnd(start: number, observedEnd: number, monthDays: number): number {
+  const fixedEnd = start === 1
+    ? 9
+    : start === 10
+      ? 16
+      : start === 17
+        ? 23
+        : start === 24
+          ? monthDays
+          : observedEnd;
+  return Math.min(monthDays, Math.max(observedEnd, fixedEnd));
+}
+
 function findTextColumn(
   sheet: XLSX.WorkSheet,
   row: number,
@@ -126,7 +139,7 @@ function findMetricColumns(
   return { revenueCol, marginCol };
 }
 
-function detectLayout(sheet: XLSX.WorkSheet, range: XLSX.Range): PlanFactLayout {
+function detectLayout(sheet: XLSX.WorkSheet, range: XLSX.Range, monthDays: number): PlanFactLayout {
   const maxHeaderRow = Math.min(range.e.r + 1, 20);
   let totalHeaderRow: number | null = null;
   let totalStartCol: number | null = null;
@@ -188,7 +201,11 @@ function detectLayout(sheet: XLSX.WorkSheet, range: XLSX.Range): PlanFactLayout 
     const raw = text(cellAt(sheet, totalHeaderRow, col));
     const match = raw.match(/^\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*$/);
     if (!match) continue;
-    segmentHeaders.push({ start: Number(match[1]), end: Number(match[2]), col });
+    segmentHeaders.push({
+      start: Number(match[1]),
+      end: canonicalPlanSegmentEnd(Number(match[1]), Number(match[2]), monthDays),
+      col
+    });
   }
 
   const segments: PlanSegment[] = [];
@@ -259,9 +276,9 @@ export function parsePlanFactWorkbook(buffer: Buffer, filename: string): ParsedP
   if (!reportDate) throw new Error("Не удалось определить дату отчёта из имени файла. Используйте формат вроде: факт 08.08.xlsx");
   if (reportDate < periodStart || reportDate > periodEnd) throw new Error("Дата отчёта из имени файла не входит в период книги.");
 
-  const layout = detectLayout(sheet, range);
   const reportDay = Number(reportDate.slice(8, 10));
   const monthDays = daysInMonth(reportDate);
+  const layout = detectLayout(sheet, range, monthDays);
   const horizonDay = Math.min(layout.planHorizonEndDay, monthDays);
   const planHorizonEnd = dateWithDay(reportDate, horizonDay);
   const rows = (sheet["!rows"] ?? []) as RowInfo[];
