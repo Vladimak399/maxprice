@@ -19,6 +19,10 @@ function progressBar(value: number): string {
   return `${"█".repeat(filled)}${"░".repeat(width - filled)}`;
 }
 
+function dateLabel(value: string): string {
+  return value.split("-").reverse().join(".");
+}
+
 function categoryLine(category: ForecastResult["categories"][number]): string {
   const marker = category.forecastRevenueRatio >= 1.02 ? "🟢" : category.forecastRevenueRatio >= 0.98 ? "🟡" : "🔴";
   return `${marker} ${category.category}: ${percent(category.forecastRevenueRatio)}`;
@@ -29,22 +33,27 @@ export function formatPlan(result: ForecastResult): string {
   const opportunities = [...result.categories].sort((a, b) => b.forecastRevenueRatio - a.forecastRevenueRatio).slice(0, 2);
   const forecastChange = result.previousForecastRevenueRatio === null ? null : result.forecastRevenueRatio - result.previousForecastRevenueRatio;
   const weatherPp = result.snapshot.overall.monthlyPlanRevenue > 0 ? result.weatherImpactRevenue / result.snapshot.overall.monthlyPlanRevenue : 0;
+  const horizonLabel = dateLabel(result.snapshot.planHorizonEnd);
+  const forecastTitle = result.snapshot.planIsFullMonth ? "Прогноз месяца" : `Прогноз к ${horizonLabel}`;
+  const planTitle = result.snapshot.planIsFullMonth ? "Выполнение месячного плана" : `Выполнение плана до ${horizonLabel}`;
+  const remainingTitle = result.snapshot.planIsFullMonth ? "До плана месяца осталось" : `До плана на ${horizonLabel} осталось`;
+  const tempoTitle = result.snapshot.planIsFullMonth ? "Нужно в среднем до конца месяца" : `Нужно в среднем до ${horizonLabel}`;
   const lines = [
-    `📊 ПЛАН-ФАКТ НА ${result.snapshot.reportDate.split("-").reverse().join(".")}`,
+    `📊 ПЛАН-ФАКТ НА ${dateLabel(result.snapshot.reportDate)}`,
     "",
     `Факт: ${rub(result.snapshot.overall.actualRevenue)}`,
     `План на дату: ${rub(result.snapshot.overall.planToDateRevenue)}`,
     `Выполнение на дату: ${percent(result.planToDateRatio)}`,
     `${progressBar(result.planToDateRatio)} ${percent(result.planToDateRatio)}`,
     "",
-    `Прогноз месяца: ${rub(result.forecastRevenue)}`,
-    `Выполнение месячного плана: ${percent(result.forecastRevenueRatio)}`,
+    `${forecastTitle}: ${rub(result.forecastRevenue)}`,
+    `${planTitle}: ${percent(result.forecastRevenueRatio)}`,
     `Прогноз по валу: ${percent(result.forecastMarginRatio)}`,
-    ...(forecastChange === null ? [] : [`Изменение к предыдущему снимку: ${pp(forecastChange)}`]),
+    ...(forecastChange === null ? [] : [`Изменение к предыдущему сопоставимому снимку: ${pp(forecastChange)}`]),
     `Погодная поправка: ${pp(weatherPp)}`,
     "",
-    `До плана осталось: ${rub(Math.max(0, result.snapshot.overall.monthlyPlanRevenue - result.snapshot.overall.actualRevenue))}`,
-    `Нужно в среднем: ${rub(result.requiredDailyRevenue)} в день`,
+    `${remainingTitle}: ${rub(Math.max(0, result.snapshot.overall.monthlyPlanRevenue - result.snapshot.overall.actualRevenue))}`,
+    `${tempoTitle}: ${rub(result.requiredDailyRevenue)} в день`,
     ...(result.recentDailyRevenue === null ? [] : [`Последний интервал: ${rub(result.recentDailyRevenue)} в день`]),
     "",
     "Риски:",
@@ -53,8 +62,8 @@ export function formatPlan(result: ForecastResult): string {
     "Сильные категории:",
     ...opportunities.map(categoryLine),
     "",
-    `Продажи обновлены: по ${result.snapshot.reportDate.split("-").reverse().join(".")}`,
-    result.weather ? `Погода: ${result.weather.startDate.split("-").reverse().join(".")}–${result.weather.endDate.split("-").reverse().join(".")}, средний максимум ${result.weather.averageMaxTemperature.toFixed(1).replace(".", ",")} °C` : "Погода временно недоступна.",
+    `Продажи обновлены: по ${dateLabel(result.snapshot.reportDate)}`,
+    result.weather ? `Погода: ${dateLabel(result.weather.startDate)}–${dateLabel(result.weather.endDate)}, средний максимум ${result.weather.averageMaxTemperature.toFixed(1).replace(".", ",")} °C` : "Погода временно недоступна.",
     "Прогноз ориентировочный: учитывает плановую кривую, последний интервал и погоду."
   ];
   return lines.join("\n");
@@ -68,26 +77,30 @@ export function formatDataStatus(snapshots: StoredPlanFactSnapshot[]): string {
     "📁 АКТУАЛЬНОСТЬ ДАННЫХ",
     "",
     `Последний файл: ${latest.filename}`,
-    `Продажи: по ${latest.reportDate.split("-").reverse().join(".")}`,
-    `Период: ${latest.periodStart.split("-").reverse().join(".")}–${latest.periodEnd.split("-").reverse().join(".")}`,
+    `Продажи: по ${dateLabel(latest.reportDate)}`,
+    `Период факта: ${dateLabel(latest.periodStart)}–${dateLabel(latest.periodEnd)}`,
+    `План загружен до: ${dateLabel(latest.planHorizonEnd)}`,
     `Категорий: ${latest.categories.length}`,
     `Загружено: ${new Date(latest.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Kaliningrad" })}`,
-    previous ? `Предыдущий снимок: по ${previous.reportDate.split("-").reverse().join(".")}` : "Предыдущего снимка пока нет."
+    previous ? `Предыдущий снимок: по ${dateLabel(previous.reportDate)}` : "Предыдущего снимка пока нет."
   ].join("\n");
 }
 
 export function formatUploadSuccess(result: ForecastResult, filename: string): string {
   const change = result.previousForecastRevenueRatio === null ? null : result.forecastRevenueRatio - result.previousForecastRevenueRatio;
+  const horizonLabel = dateLabel(result.snapshot.planHorizonEnd);
+  const forecastLabel = result.snapshot.planIsFullMonth ? "Прогноз месяца" : `Прогноз к ${horizonLabel}`;
   return [
     "✅ ОТЧЁТ ЗАГРУЖЕН",
     "",
     `Файл: ${filename}`,
-    `Период факта: по ${result.snapshot.reportDate.split("-").reverse().join(".")}`,
+    `Период факта: по ${dateLabel(result.snapshot.reportDate)}`,
+    `План доступен до: ${horizonLabel}`,
     `Категорий найдено: ${result.snapshot.categories.length}`,
     `Факт: ${rub(result.snapshot.overall.actualRevenue)}`,
     `План на дату: ${rub(result.snapshot.overall.planToDateRevenue)}`,
-    `Прогноз месяца: ${percent(result.forecastRevenueRatio)}`,
-    ...(change === null ? [] : [`Изменение к предыдущему снимку: ${pp(change)}`]),
+    `${forecastLabel}: ${percent(result.forecastRevenueRatio)}`,
+    ...(change === null ? [] : [`Изменение к предыдущему сопоставимому снимку: ${pp(change)}`]),
     "",
     "Напишите «План», чтобы получить полный результат."
   ].join("\n");
